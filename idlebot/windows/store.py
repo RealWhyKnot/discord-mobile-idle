@@ -19,6 +19,9 @@ DEFAULT_SETTINGS = {
     "ON_DEBOUNCE_POLLS": "2",
     "OFF_DEBOUNCE_POLLS": "4",
     "WATCHDOG_SECONDS": "120",
+    "UPDATE_CHANNEL": "release",
+    "CHECK_FOR_UPDATES": "true",
+    "SKIPPED_TAG": "",
 }
 
 log = logging.getLogger("idlebot")

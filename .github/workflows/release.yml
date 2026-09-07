@@ -9,6 +9,12 @@ on:
       tag:
         description: 'Tag to release, for example v2026.9.6.0 or v2026.9.6.0-beta'
         required: true
+  workflow_call:
+    inputs:
+      tag:
+        description: 'Tag to release'
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -25,13 +31,13 @@ jobs:
         with:
           fetch-depth: 0
           fetch-tags: true
-          ref: ${{ github.event.inputs.tag || github.ref }}
+          ref: ${{ inputs.tag || github.ref }}
 
       - name: Resolve release tag
         id: release_tag
         shell: pwsh
         run: |
-          $tag = '${{ github.event.inputs.tag }}'
+          $tag = '${{ inputs.tag }}'
           if ([string]::IsNullOrWhiteSpace($tag)) {
             $tag = '${{ github.ref_name }}'
           }
@@ -45,12 +51,12 @@ jobs:
           "tag=$tag" >> $env:GITHUB_OUTPUT
           "version=$($tag -replace '^v', '')" >> $env:GITHUB_OUTPUT
 
-      - name: Detect beta tag
-        id: beta
+      - name: Detect prerelease tag
+        id: prerelease
         shell: pwsh
         run: |
-          $isBeta = '${{ steps.release_tag.outputs.tag }}' -match '^v\d{4}\.\d+\.\d+\.\d+-beta$'
-          "is_beta=$($isBeta.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          $isPre = '${{ steps.release_tag.outputs.tag }}' -match '^v\d{4}\.\d+\.\d+\.\d+-([A-Fa-f0-9]{4}|beta)$'
+          "is_prerelease=$($isPre.ToString().ToLower())" >> $env:GITHUB_OUTPUT
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -68,6 +74,15 @@ jobs:
           python -m ruff format --check .
           python -m ruff check .
           python -m pytest
+
+      - name: Stamp the version
+        shell: pwsh
+        run: |
+          $version = '${{ steps.release_tag.outputs.version }}'
+          $line = 'VERSION = "' + $version + '"'
+          [System.IO.File]::WriteAllText('idlebot/windows/_version.py', "$line`n", [System.Text.UTF8Encoding]::new($false))
+          python -c "import sys; from idlebot.windows._version import VERSION; sys.exit(0 if VERSION == sys.argv[1] else 1)" $version
+          if ($LASTEXITCODE -ne 0) { throw "the stamped version did not read back as $version" }
 
       - name: Build the Windows executable
         run: >
@@ -142,5 +157,5 @@ jobs:
         run: |
           $assets = @('${{ steps.package.outputs.zip }}', '${{ steps.package.outputs.integrity }}')
           $extra = @()
-          if ('${{ steps.beta.outputs.is_beta }}' -eq 'true') { $extra = @('--prerelease', '--latest=false') }
+          if ('${{ steps.prerelease.outputs.is_prerelease }}' -eq 'true') { $extra = @('--prerelease', '--latest=false') }
           gh release create '${{ steps.release_tag.outputs.tag }}' @assets --title '${{ steps.release_tag.outputs.tag }}' --notes-file '${{ steps.notes.outputs.path }}' @extra
