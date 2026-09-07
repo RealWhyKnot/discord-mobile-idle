@@ -9,9 +9,12 @@ starting at 0.
 ## Unreleased
 
 
+
 ### Added
 - Add a Windows tray client (2026.9.6.0-E932) (7d74382)
 - Restore the saved status on shutdown (2026.9.6.0-E932) (b46ab2c)
+- Check for and install new releases from the tray (2026.9.7.0-A528) (5b5280d)
+- Add release selection and integrity parsing for the updater (2026.9.7.0-A528) (f62c1b9)
 
 ### Changed
 - Share the Discord adapter between entry points (2026.9.6.0-E932) (c599161)
