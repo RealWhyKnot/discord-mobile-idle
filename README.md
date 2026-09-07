@@ -1,5 +1,7 @@
 # discord-mobile-idle
 
+[![tests](https://img.shields.io/github/actions/workflow/status/RealWhyKnot/discord-mobile-idle/tests.yml?branch=main&label=tests)](https://github.com/RealWhyKnot/discord-mobile-idle/actions/workflows/tests.yml)
+
 Shows you as idle on Discord while you're on your phone.
 
 ## Before you use this
