@@ -10,6 +10,7 @@ starting at 0.
 
 
 
+
 ### Added
 - Add a Windows tray client (2026.9.6.0-E932) (7d74382)
 - Restore the saved status on shutdown (2026.9.6.0-E932) (b46ab2c)
@@ -18,4 +19,7 @@ starting at 0.
 
 ### Changed
 - Share the Discord adapter between entry points (2026.9.6.0-E932) (c599161)
+
+### Fixed
+- Log what the update check found (2026.9.7.0-A528) (16b1f53)
 
