@@ -1,0 +1,146 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to release, for example v2026.9.6.0 or v2026.9.6.0-beta'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and publish release
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve release tag
+        id: release_tag
+        shell: pwsh
+        run: |
+          $tag = '${{ github.event.inputs.tag }}'
+          if ([string]::IsNullOrWhiteSpace($tag)) {
+            $tag = '${{ github.ref_name }}'
+          }
+          if ($tag -notmatch '^v\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4}|beta))?$') {
+            throw "tag '$tag' does not match vYYYY.M.D.N, vYYYY.M.D.N-XXXX, or vYYYY.M.D.N-beta."
+          }
+          git rev-parse --verify --quiet "refs/tags/$tag^{commit}" *> $null
+          if ($LASTEXITCODE -ne 0) {
+            throw "tag '$tag' does not exist in the checked-out repository."
+          }
+          "tag=$tag" >> $env:GITHUB_OUTPUT
+          "version=$($tag -replace '^v', '')" >> $env:GITHUB_OUTPUT
+
+      - name: Detect beta tag
+        id: beta
+        shell: pwsh
+        run: |
+          $isBeta = '${{ steps.release_tag.outputs.tag }}' -match '^v\d{4}\.\d+\.\d+\.\d+-beta$'
+          "is_beta=$($isBeta.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: '3.13'
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install pyinstaller
+          python -m pip install -r requirements-win.txt -r requirements-dev.txt
+
+      - name: Validate
+        run: |
+          python -m ruff format --check .
+          python -m ruff check .
+          python -m pytest
+
+      - name: Build the Windows executable
+        run: >
+          pyinstaller --onefile --clean --noconfirm --noconsole
+          --name discord-mobile-idle --distpath dist/exe --paths . --icon packaging/icon.ico
+          --collect-all curl_cffi --collect-all discord_protos
+          --collect-submodules discord --collect-submodules pystray
+          --hidden-import audioop packaging/entry.py
+
+      - name: Smoke test the executable
+        shell: pwsh
+        run: |
+          $exe = 'dist/exe/discord-mobile-idle.exe'
+          $run = Start-Process -FilePath $exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($run.ExitCode -ne 0) {
+            Get-Content "$env:LOCALAPPDATA/discord-mobile-idle/self-test.log" -ErrorAction SilentlyContinue
+            throw "self test exited with $($run.ExitCode)."
+          }
+
+      - name: Package
+        id: package
+        shell: pwsh
+        run: |
+          $version = '${{ steps.release_tag.outputs.version }}'
+          $stage = "dist/stage/discord-mobile-idle-$version"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item dist/exe/discord-mobile-idle.exe $stage
+          Copy-Item README.md, LICENSE $stage
+          $zip = "dist/discord-mobile-idle-$version.zip"
+          Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
+          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
+          $lines = @("$hash`t$((Get-Item $zip).Length)`t$(Split-Path $zip -Leaf)")
+          $integrity = "dist/discord-mobile-idle-$version.integrity.tsv"
+          [System.IO.File]::WriteAllLines($integrity, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
+          "zip=$zip" >> $env:GITHUB_OUTPUT
+          "name=$(Split-Path $zip -Leaf)" >> $env:GITHUB_OUTPUT
+          "sha256=$hash" >> $env:GITHUB_OUTPUT
+          "integrity=$integrity" >> $env:GITHUB_OUTPUT
+
+      - name: Build release notes
+        id: notes
+        shell: pwsh
+        run: |
+          $tag = '${{ steps.release_tag.outputs.tag }}'
+          $prev = & git describe --tags --abbrev=0 --exclude '*-*' "$tag^" 2>$null
+          $range = if ($LASTEXITCODE -eq 0 -and $prev) { "$prev..$tag" } else { $tag }
+          $subjects = git log --no-merges --format='- %s (%h)' $range |
+            Where-Object { $_ -notmatch '\[skip changelog\]' } |
+            ForEach-Object { $_ -replace ' \(\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4}|beta))?\)', '' }
+          if (-not $subjects) { $subjects = @('- Maintenance release') }
+          $zipName = '${{ steps.package.outputs.name }}'
+          $lines = @('## Changes', '')
+          $lines += @($subjects)
+          $lines += @(
+            "",
+            "## Downloads",
+            "",
+            "- ``$zipName`` holds the Windows tray app. Unpack it anywhere and run the exe; no Python needed.",
+            "- The Docker image is built from this repository, see the readme.",
+            "- SHA256 of the zip: ``${{ steps.package.outputs.sha256 }}``",
+            "- Hashes for every file are in the attached ``.integrity.tsv``."
+          )
+          $body = $lines -join "`n"
+          $path = Join-Path $env:RUNNER_TEMP 'release-notes.md'
+          [System.IO.File]::WriteAllText($path, $body, [System.Text.UTF8Encoding]::new($false))
+          "path=$path" >> $env:GITHUB_OUTPUT
+
+      - name: Create GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $assets = @('${{ steps.package.outputs.zip }}', '${{ steps.package.outputs.integrity }}')
+          $extra = @()
+          if ('${{ steps.beta.outputs.is_beta }}' -eq 'true') { $extra = @('--prerelease', '--latest=false') }
+          gh release create '${{ steps.release_tag.outputs.tag }}' @assets --title '${{ steps.release_tag.outputs.tag }}' --notes-file '${{ steps.notes.outputs.path }}' @extra
