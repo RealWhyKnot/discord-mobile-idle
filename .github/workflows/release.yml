@@ -124,31 +124,17 @@ jobs:
 
       - name: Build release notes
         id: notes
-        shell: pwsh
-        run: |
-          $tag = '${{ steps.release_tag.outputs.tag }}'
-          $prev = & git describe --tags --abbrev=0 --exclude '*-*' "$tag^" 2>$null
-          $range = if ($LASTEXITCODE -eq 0 -and $prev) { "$prev..$tag" } else { $tag }
-          $subjects = git log --no-merges --format='- %s (%h)' $range |
-            Where-Object { $_ -notmatch '\[skip changelog\]' } |
-            ForEach-Object { $_ -replace ' \(\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4}|beta))?\)', '' }
-          if (-not $subjects) { $subjects = @('- Maintenance release') }
-          $zipName = '${{ steps.package.outputs.name }}'
-          $lines = @('## Changes', '')
-          $lines += @($subjects)
-          $lines += @(
-            "",
-            "## Downloads",
-            "",
-            "- ``$zipName`` holds the Windows tray app. Unpack it anywhere and run the exe; no Python needed.",
-            "- The Docker image is built from this repository, see the readme.",
-            "- SHA256 of the zip: ``${{ steps.package.outputs.sha256 }}``",
-            "- Hashes for every file are in the attached ``.integrity.tsv``."
-          )
-          $body = $lines -join "`n"
-          $path = Join-Path $env:RUNNER_TEMP 'release-notes.md'
-          [System.IO.File]::WriteAllText($path, $body, [System.Text.UTF8Encoding]::new($false))
-          "path=$path" >> $env:GITHUB_OUTPUT
+        uses: RealWhyKnot/workflows/release-notes@v1
+        with:
+          tag: ${{ steps.release_tag.outputs.tag }}
+          title: discord-mobile-idle ${{ steps.release_tag.outputs.tag }}
+          extra: |
+            ## Downloads
+
+            - `${{ steps.package.outputs.name }}` holds the Windows tray app. Unpack it anywhere and run the exe; no Python needed.
+            - The Docker image is built from this repository, see the readme.
+            - SHA256 of the zip: `${{ steps.package.outputs.sha256 }}`
+            - Hashes for every file are in the attached `.integrity.tsv`.
 
       - name: Create GitHub release
         env:
@@ -158,4 +144,4 @@ jobs:
           $assets = @('${{ steps.package.outputs.zip }}', '${{ steps.package.outputs.integrity }}')
           $extra = @()
           if ('${{ steps.prerelease.outputs.is_prerelease }}' -eq 'true') { $extra = @('--prerelease', '--latest=false') }
-          gh release create '${{ steps.release_tag.outputs.tag }}' @assets --title '${{ steps.release_tag.outputs.tag }}' --notes-file '${{ steps.notes.outputs.path }}' @extra
+          gh release create '${{ steps.release_tag.outputs.tag }}' @assets --title '${{ steps.release_tag.outputs.tag }}' --notes-file '${{ steps.notes.outputs.file }}' @extra
