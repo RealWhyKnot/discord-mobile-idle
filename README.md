@@ -133,7 +133,7 @@ python -m venv .venv
 ## Before pushing
 
 ```
-.erify.ps1
+.\verify.ps1
 ```
 
 That lints, runs the tests, checks the container entry point starts from the image bundle alone,
