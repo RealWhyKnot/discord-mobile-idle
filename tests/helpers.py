@@ -54,8 +54,9 @@ def make_controller(managed=(ONLINE,), restore=ONLINE, grace_ticks=0):
     return StatusController(restore, set(managed), grace_ticks=grace_ticks)
 
 
-def make_runner(client, managed=(ONLINE,), restore=ONLINE, on_polls=1, off_polls=1,
-                observe=False, clock=None, grace_ticks=0):
+def make_runner(
+    client, managed=(ONLINE,), restore=ONLINE, on_polls=1, off_polls=1, observe=False, clock=None, grace_ticks=0
+):
     return Runner(
         client,
         make_controller(managed, restore, grace_ticks),

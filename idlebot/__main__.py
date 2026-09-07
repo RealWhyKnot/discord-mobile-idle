@@ -29,9 +29,7 @@ class DiscordClient:
         return str(self._client.status)
 
     async def change_presence(self, *, status, edit_settings=True):
-        await self._client.change_presence(
-            status=discord.Status(status), edit_settings=edit_settings
-        )
+        await self._client.change_presence(status=discord.Status(status), edit_settings=edit_settings)
 
 
 def write_ready():

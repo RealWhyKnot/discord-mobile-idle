@@ -51,16 +51,12 @@ def load_config(env=None):
         raise ConfigError("MANAGED_STATUSES has unknown values: %s" % sorted(unknown))
     unmanageable = managed - ADOPTABLE
     if unmanageable:
-        raise ConfigError(
-            "MANAGED_STATUSES may only contain %s, got %s" % (sorted(ADOPTABLE), sorted(unmanageable))
-        )
+        raise ConfigError("MANAGED_STATUSES may only contain %s, got %s" % (sorted(ADOPTABLE), sorted(unmanageable)))
 
     poll_seconds = _int(env, "POLL_SECONDS", 10)
     watchdog_seconds = _int(env, "WATCHDOG_SECONDS", 120)
     if watchdog_seconds <= poll_seconds:
-        raise ConfigError(
-            "WATCHDOG_SECONDS (%d) must exceed POLL_SECONDS (%d)" % (watchdog_seconds, poll_seconds)
-        )
+        raise ConfigError("WATCHDOG_SECONDS (%d) must exceed POLL_SECONDS (%d)" % (watchdog_seconds, poll_seconds))
 
     return Config(
         token=token,

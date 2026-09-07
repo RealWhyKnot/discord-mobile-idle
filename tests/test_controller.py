@@ -1,5 +1,4 @@
 import pytest
-
 from helpers import DND, IDLE, INVISIBLE, OFFLINE, ONLINE, make_controller
 
 
