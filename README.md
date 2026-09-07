@@ -1,15 +1,19 @@
 # discord-mobile-idle
 
-[![tests](https://img.shields.io/github/actions/workflow/status/RealWhyKnot/discord-mobile-idle/tests.yml?branch=main&label=tests)](https://github.com/RealWhyKnot/discord-mobile-idle/actions/workflows/tests.yml)
+[![CI](https://img.shields.io/github/actions/workflow/status/RealWhyKnot/discord-mobile-idle/ci.yml?branch=main&label=CI)](https://github.com/RealWhyKnot/discord-mobile-idle/actions/workflows/ci.yml)
 
 Shows you as idle on Discord while you're on your phone.
+
+Discord puts a phone icon on your avatar when you're on mobile, but it won't change your status, so
+I wrote this.
 
 ## Before you use this
 
 This drives a **user account** with a user token, not a bot account. Discord's Terms of Service
-prohibit automating user accounts, and doing so can get your account terminated. Use this at your own risk.
+prohibit automating user accounts, and doing so can get your account terminated. I run it on my own
+account, but use this at your own risk.
 
-The token is equivalent to your password, keep it safe.
+Your token is equivalent to your password, keep it safe.
 
 ## Getting a token
 
@@ -25,7 +29,7 @@ docker run -d --name discord-mobile-idle --restart always \
     discord-mobile-idle
 ```
 
-Run **one instance only**. Two logins on the same token will fight over your status.
+Only run one instance. Two logins on the same token fight over your status.
 
 Without Docker: `pip install -r requirements.txt`, then `DISCORD_TOKEN=... python -m idlebot`.
 
@@ -49,14 +53,14 @@ python -m idlebot --sessions    # dump the session list and exit
 python -m idlebot --observe     # log what it would do, write nothing
 ```
 
-`--observe` is the safe way to check detection against a live account: it simulates its own writes so
-the state machine still advances, but never touches your status.
+`--observe` never writes your status, so it's what I use to check detection against a live account.
 
 ## Tests
 
 ```
 python -m venv .venv
 .venv/bin/python -m pip install -r requirements-dev.txt    # .venv/Scripts on Windows
+.venv/bin/python -m ruff check .
 .venv/bin/python -m pytest
 ```
 
