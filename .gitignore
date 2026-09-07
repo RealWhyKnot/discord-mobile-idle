@@ -12,3 +12,4 @@ dist/
 *.log
 *.pid
 .env
+verify.local.ps1

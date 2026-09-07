@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+if [ -n "${SKIP_VERIFY:-}" ]; then
+    exit 0
+fi
+
+deleting_only=1
+while read -r _local_ref local_sha _remote_ref _remote_sha; do
+    case "$local_sha" in
+        *[!0]*) deleting_only=0 ;;
+    esac
+done
+if [ "$deleting_only" = "1" ]; then
+    exit 0
+fi
+
+root=$(git rev-parse --show-toplevel)
+script="$root/verify.ps1"
+if [ ! -f "$script" ]; then
+    exit 0
+fi
+
+shell_bin=$(command -v powershell.exe || command -v pwsh || true)
+if [ -z "$shell_bin" ]; then
+    echo "pre-push: no PowerShell found, skipping verify.ps1" >&2
+    exit 0
+fi
+
+if command -v cygpath >/dev/null 2>&1; then
+    script=$(cygpath -w "$script")
+fi
+
+echo "pre-push: running verify.ps1"
+if ! "$shell_bin" -NoProfile -ExecutionPolicy Bypass -File "$script"; then
+    echo "" >&2
+    echo "pre-push: verify.ps1 failed. Fix it, or push with --no-verify if you meant to." >&2
+    exit 1
+fi

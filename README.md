@@ -118,6 +118,18 @@ python -m venv .venv
 .venv/bin/python -m pytest
 ```
 
+## Before pushing
+
+```
+.erify.ps1
+```
+
+That lints, runs the tests, checks the container entry point starts from the image bundle alone,
+builds the image if Docker is on PATH, and builds the executable and runs its self test. A
+`pre-push` hook in `.githooks` runs it for you once `git config core.hooksPath .githooks` is set.
+Drop a `verify.local.ps1` beside it and that runs too, which is where a machine-specific check
+belongs. `git push --no-verify` skips the lot.
+
 ## Licence
 
 MIT.
