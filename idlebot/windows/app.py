@@ -143,12 +143,15 @@ class App:
             skipped = "" if manual else settings.get("SKIPPED_TAG", "").strip()
             chosen = update.check(channel, skipped)
             if chosen is None:
+                log.info("no update on the %s channel, staying on %s", channel, update.VERSION)
                 self.set_update("current")
                 if manual:
                     self.notify("You are on the latest version.")
                 return
-            self.staged = update.stage(chosen)
             self.tag = chosen.get("tag_name", "")
+            log.info("downloading %s", self.tag)
+            self.staged = update.stage(chosen)
+            log.info("%s is staged and ready to install", self.tag)
             self.set_update("ready")
             self.notify("%s is ready to install." % self.tag)
         except Exception:
