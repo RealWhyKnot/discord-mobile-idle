@@ -67,6 +67,15 @@ class Runner:
         log.info("status %s -> %s (on_mobile=%s)", current, self.pending, stable)
         self.pending = None
 
+    async def hand_back(self):
+        if self.observe or not self.controller.holding:
+            return
+        if self.client.status != self.controller.idle_status:
+            return
+        target = self.controller.saved or self.controller.default_restore
+        await self.client.change_presence(status=target, edit_settings=True)
+        log.info("restored %s on shutdown", target)
+
     async def run(self):
         while True:
             try:

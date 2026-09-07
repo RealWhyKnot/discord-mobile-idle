@@ -149,3 +149,60 @@ async def test_liveness_logs_after_the_interval(monkeypatch, caplog):
 
     messages = [record.getMessage() for record in caplog.records]
     assert sum("alive uptime=" in message for message in messages) == 1
+
+
+async def test_hand_back_writes_nothing_when_not_holding():
+    client = FakeClient()
+    runner = make_runner(client)
+
+    await runner.hand_back()
+
+    assert client.calls == []
+
+
+async def test_hand_back_writes_nothing_in_observe_mode():
+    client = FakeClient()
+    runner = make_runner(client, observe=True)
+    client.set_mobile(True)
+    await runner.tick()
+
+    await runner.hand_back()
+
+    assert client.calls == []
+    assert runner.controller.holding
+
+
+async def test_hand_back_restores_the_saved_status():
+    client = FakeClient(status=DND)
+    runner = make_runner(client, managed=(ONLINE, DND))
+    client.set_mobile(True)
+    await runner.tick()
+    assert client.status == IDLE
+
+    await runner.hand_back()
+
+    assert client.status == DND
+
+
+async def test_hand_back_falls_back_to_the_default_restore():
+    client = FakeClient(status=IDLE)
+    runner = make_runner(client)
+    client.set_mobile(True)
+    await runner.tick()
+
+    await runner.hand_back()
+
+    assert client.status == ONLINE
+
+
+async def test_hand_back_leaves_a_manual_override_alone():
+    client = FakeClient()
+    runner = make_runner(client)
+    client.set_mobile(True)
+    await runner.tick()
+    client.set_status(DND)
+    client.calls.clear()
+
+    await runner.hand_back()
+
+    assert client.calls == []
