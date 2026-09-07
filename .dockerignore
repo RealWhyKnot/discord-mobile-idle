@@ -5,9 +5,12 @@
 .githooks
 .editorconfig
 tests
+packaging
+idlebot/windows
 pyproject.toml
 pytest.ini
 requirements-dev.txt
+requirements-win.txt
 README.md
 LICENSE
 CHANGELOG.md
@@ -19,6 +22,9 @@ __pycache__
 .ruff_cache
 .coverage
 htmlcov
+build
+dist
+*.spec
 .venv
 *.token
 *.log

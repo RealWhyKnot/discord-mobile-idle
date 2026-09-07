@@ -5,6 +5,9 @@ __pycache__/
 .coverage
 htmlcov/
 .venv/
+build/
+dist/
+*.spec
 *.token
 *.log
 *.pid
