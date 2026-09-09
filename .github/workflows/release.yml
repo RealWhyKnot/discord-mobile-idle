@@ -35,28 +35,10 @@ jobs:
 
       - name: Resolve release tag
         id: release_tag
-        shell: pwsh
-        run: |
-          $tag = '${{ inputs.tag }}'
-          if ([string]::IsNullOrWhiteSpace($tag)) {
-            $tag = '${{ github.ref_name }}'
-          }
-          if ($tag -notmatch '^v\d{4}\.\d+\.\d+\.\d+(-([A-Fa-f0-9]{4}|beta))?$') {
-            throw "tag '$tag' does not match vYYYY.M.D.N, vYYYY.M.D.N-XXXX, or vYYYY.M.D.N-beta."
-          }
-          git rev-parse --verify --quiet "refs/tags/$tag^{commit}" *> $null
-          if ($LASTEXITCODE -ne 0) {
-            throw "tag '$tag' does not exist in the checked-out repository."
-          }
-          "tag=$tag" >> $env:GITHUB_OUTPUT
-          "version=$($tag -replace '^v', '')" >> $env:GITHUB_OUTPUT
-
-      - name: Detect prerelease tag
-        id: prerelease
-        shell: pwsh
-        run: |
-          $isPre = '${{ steps.release_tag.outputs.tag }}' -match '^v\d{4}\.\d+\.\d+\.\d+-([A-Fa-f0-9]{4}|beta)$'
-          "is_prerelease=$($isPre.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+        uses: RealWhyKnot/workflows/resolve-tag@v1
+        with:
+          tag: ${{ inputs.tag }}
+          prerelease-pattern: '^v\d{4}\.\d+\.\d+\.\d+-([A-Fa-f0-9]{4}|beta)$'
 
       - name: Set up Python
         uses: actions/setup-python@v7
@@ -137,11 +119,11 @@ jobs:
             - Hashes for every file are in the attached `.integrity.tsv`.
 
       - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        shell: pwsh
-        run: |
-          $assets = @('${{ steps.package.outputs.zip }}', '${{ steps.package.outputs.integrity }}')
-          $extra = @()
-          if ('${{ steps.prerelease.outputs.is_prerelease }}' -eq 'true') { $extra = @('--prerelease', '--latest=false') }
-          gh release create '${{ steps.release_tag.outputs.tag }}' @assets --title '${{ steps.release_tag.outputs.tag }}' --notes-file '${{ steps.notes.outputs.file }}' @extra
+        uses: RealWhyKnot/workflows/publish-release@v1
+        with:
+          tag: ${{ steps.release_tag.outputs.tag }}
+          notes-file: ${{ steps.notes.outputs.file }}
+          prerelease: ${{ steps.release_tag.outputs.prerelease }}
+          assets: |
+            ${{ steps.package.outputs.zip }}
+            ${{ steps.package.outputs.integrity }}
