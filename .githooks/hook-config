@@ -1,0 +1,2 @@
+VERSION_FILE='commit-version.txt'
+VERSION_IN_GITDIR=1
