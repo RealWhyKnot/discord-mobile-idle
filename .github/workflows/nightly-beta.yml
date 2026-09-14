@@ -13,6 +13,10 @@ jobs:
     uses: RealWhyKnot/workflows/.github/workflows/nightly-beta.yml@v1
     with:
       prerelease-suffix: 'beta'
+      ignore-paths: |
+        verify.ps1
+        pytest.ini
+        requirements-dev.txt
 
   release:
     needs: tag
