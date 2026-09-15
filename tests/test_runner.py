@@ -1,3 +1,4 @@
+import asyncio
 import logging
 
 import pytest
@@ -193,6 +194,72 @@ async def test_hand_back_falls_back_to_the_default_restore():
     await runner.hand_back()
 
     assert client.status == ONLINE
+
+
+async def test_wake_if_mobile_sets_on_rising_edge():
+    client = FakeClient(on_mobile=True)
+    runner = make_runner(client)
+
+    runner.wake_if_mobile()
+
+    assert runner.wake.is_set()
+
+
+async def test_wake_if_mobile_ignores_when_no_mobile():
+    client = FakeClient()
+    runner = make_runner(client)
+
+    runner.wake_if_mobile()
+
+    assert not runner.wake.is_set()
+
+
+async def test_wake_if_mobile_ignores_when_already_stable():
+    client = FakeClient(on_mobile=True)
+    runner = make_runner(client)
+    runner.debouncer.stable = True
+
+    runner.wake_if_mobile()
+
+    assert not runner.wake.is_set()
+
+
+async def test_wait_for_wake_returns_promptly_and_clears():
+    client = FakeClient()
+    runner = make_runner(client)
+    runner.poll_seconds = 60
+    runner.wake.set()
+
+    await runner.wait_for_wake()
+
+    assert not runner.wake.is_set()
+
+
+async def test_wait_for_wake_times_out_at_the_poll_interval():
+    client = FakeClient()
+    runner = make_runner(client)
+
+    await runner.wait_for_wake()
+
+    assert not runner.wake.is_set()
+
+
+async def test_session_wake_causes_a_prompt_tick():
+    client = FakeClient()
+    runner = make_runner(client)
+    runner.poll_seconds = 30
+    task = asyncio.create_task(runner.run())
+    await asyncio.sleep(0.01)
+    assert client.calls == []
+
+    client.set_mobile(True)
+    runner.wake_if_mobile()
+    await asyncio.sleep(0.01)
+
+    assert client.calls == [(IDLE, True)]
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
 
 async def test_hand_back_leaves_a_manual_override_alone():

@@ -98,6 +98,19 @@ def main(argv=None):
         log.info("gateway resumed")
         debouncer.reset()
         runner.last_tick = runner.clock()
+        runner.wake_if_mobile()
+
+    @client.event
+    async def on_session_create(session):
+        runner.wake_if_mobile()
+
+    @client.event
+    async def on_session_update(before, after):
+        runner.wake_if_mobile()
+
+    @client.event
+    async def on_session_delete(session):
+        runner.wake_if_mobile()
 
     log.info(
         "starting observe=%s poll=%ds managed=%s restore=%s",

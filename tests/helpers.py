@@ -50,20 +50,21 @@ class FakeClock:
         self.now += seconds
 
 
-def make_controller(managed=(ONLINE,), restore=ONLINE, grace_ticks=0):
-    return StatusController(restore, set(managed), grace_ticks=grace_ticks)
+def make_controller(managed=(ONLINE,), restore=ONLINE, grace_seconds=0, clock=None):
+    return StatusController(restore, set(managed), grace_seconds=grace_seconds, clock=clock or FakeClock())
 
 
 def make_runner(
-    client, managed=(ONLINE,), restore=ONLINE, on_polls=1, off_polls=1, observe=False, clock=None, grace_ticks=0
+    client, managed=(ONLINE,), restore=ONLINE, on_polls=1, off_polls=1, observe=False, clock=None, grace_seconds=0
 ):
+    clock = clock or FakeClock()
     return Runner(
         client,
-        make_controller(managed, restore, grace_ticks),
+        make_controller(managed, restore, grace_seconds, clock),
         Debouncer(on_polls, off_polls),
         poll_seconds=0,
         observe=observe,
-        clock=clock or FakeClock(),
+        clock=clock,
     )
 
 
@@ -75,14 +76,14 @@ async def drive(runner, ticks):
 async def run_until_cancelled(runner, sleeps, monkeypatch, advance=0.0):
     seen = {"count": 0}
 
-    async def fake_sleep(_seconds):
+    async def fake_wait():
         seen["count"] += 1
         if advance:
             runner.clock.advance(advance)
         if seen["count"] >= sleeps:
             raise asyncio.CancelledError
 
-    monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+    monkeypatch.setattr(runner, "wait_for_wake", fake_wait)
     with pytest.raises(asyncio.CancelledError):
         await runner.run()
     return seen["count"]

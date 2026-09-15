@@ -121,6 +121,19 @@ class Service:
         async def on_resumed():
             debouncer.reset()
             runner.last_tick = runner.clock()
+            runner.wake_if_mobile()
+
+        @client.event
+        async def on_session_create(session):
+            runner.wake_if_mobile()
+
+        @client.event
+        async def on_session_update(before, after):
+            runner.wake_if_mobile()
+
+        @client.event
+        async def on_session_delete(session):
+            runner.wake_if_mobile()
 
         try:
             await client.start(self.config.token)

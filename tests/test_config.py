@@ -17,7 +17,7 @@ def test_defaults():
     assert config.poll_seconds == 10
     assert config.restore == "online"
     assert config.managed == {"online"}
-    assert config.on_polls == 2
+    assert config.on_polls == 1
     assert config.off_polls == 4
     assert config.watchdog_seconds == 120
 

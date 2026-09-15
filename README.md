@@ -87,10 +87,10 @@ The container reads these from the environment. The Windows app reads the same n
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `DISCORD_TOKEN` | required | Your user token, from the environment. |
-| `POLL_SECONDS` | `10` | Seconds between checks. |
+| `POLL_SECONDS` | `10` | Fallback seconds between checks. Session events from the gateway wake a check sooner. |
 | `RESTORE_STATUS` | `online` | Fallback when there's no saved status. `online` or `dnd`. |
 | `MANAGED_STATUSES` | `online` | Which statuses may be taken over. `online` and `dnd` only. |
-| `ON_DEBOUNCE_POLLS` | `2` | Settled polls before reacting to the phone appearing. |
+| `ON_DEBOUNCE_POLLS` | `1` | Settled polls before reacting to the phone appearing. At `1` it reacts within about a second of the phone connecting. |
 | `OFF_DEBOUNCE_POLLS` | `4` | Settled polls before reacting to it going away. |
 | `WATCHDOG_SECONDS` | `120` | Give up on a poll loop that stops ticking. The container exits and restarts, the tray app reconnects. |
 | `CHECK_FOR_UPDATES` | `true` | Windows only. Whether it looks for new releases on its own. |

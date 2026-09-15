@@ -40,9 +40,21 @@ class Runner:
         self.pending = None
         self.simulated = None
         self.transitions = 0
+        self.wake = asyncio.Event()
         self.started = clock()
         self.last_tick = self.started
         self.last_liveness = self.started
+
+    def wake_if_mobile(self):
+        if self.client.is_on_mobile() and not self.debouncer.stable:
+            self.wake.set()
+
+    async def wait_for_wake(self):
+        try:
+            await asyncio.wait_for(self.wake.wait(), self.poll_seconds)
+        except asyncio.TimeoutError:
+            return
+        self.wake.clear()
 
     async def tick(self):
         raw = self.client.is_on_mobile()
@@ -84,7 +96,7 @@ class Runner:
                 log.exception("tick failed")
             self.last_tick = self.clock()
             self.liveness()
-            await asyncio.sleep(self.poll_seconds)
+            await self.wait_for_wake()
 
     def liveness(self):
         now = self.clock()

@@ -1,3 +1,5 @@
+import time
+
 IDLE = "idle"
 ONLINE = "online"
 DND = "dnd"
@@ -9,15 +11,16 @@ ADOPTABLE = frozenset({ONLINE, DND})
 
 
 class StatusController:
-    def __init__(self, default_restore, managed, idle_status=IDLE, grace_ticks=2):
+    def __init__(self, default_restore, managed, idle_status=IDLE, grace_seconds=25, clock=time.monotonic):
         self.idle_status = idle_status
         self.default_restore = default_restore
         self.managed = frozenset(managed)
-        self.grace_ticks = grace_ticks
+        self.grace_seconds = grace_seconds
+        self.clock = clock
         self.on_mobile = False
         self.saved = None
         self.holding = False
-        self.grace = 0
+        self.grace_until = 0.0
 
     def evaluate(self, is_on_mobile, current):
         if self.holding and not self._in_grace() and current != self.idle_status:
@@ -31,17 +34,14 @@ class StatusController:
         return self._hand_back(current)
 
     def _in_grace(self):
-        if self.grace <= 0:
-            return False
-        self.grace -= 1
-        return True
+        return self.clock() < self.grace_until
 
     def _take(self, current):
         if current != self.idle_status and current not in self.managed:
             return None
         self.saved = None if current == self.idle_status else current
         self.holding = True
-        self.grace = self.grace_ticks
+        self.grace_until = self.clock() + self.grace_seconds
         return self.idle_status
 
     def _hand_back(self, current):
@@ -56,7 +56,7 @@ class StatusController:
     def release(self):
         self.holding = False
         self.saved = None
-        self.grace = 0
+        self.grace_until = 0.0
 
 
 class Debouncer:

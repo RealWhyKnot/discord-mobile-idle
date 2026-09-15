@@ -1,4 +1,4 @@
-from helpers import DND, IDLE, INVISIBLE, OFFLINE, ONLINE
+from helpers import DND, IDLE, INVISIBLE, OFFLINE, ONLINE, FakeClock
 from hypothesis import given
 from hypothesis import strategies as st
 
@@ -10,10 +10,12 @@ STEPS = st.lists(st.tuples(st.booleans(), EXTERNAL), max_size=60)
 
 @given(STEPS)
 def test_controller_invariants(steps):
-    controller = StatusController(ONLINE, {ONLINE}, grace_ticks=2)
+    clock = FakeClock()
+    controller = StatusController(ONLINE, {ONLINE}, grace_seconds=2, clock=clock)
     current = ONLINE
 
     for on_mobile, external in steps:
+        clock.advance(1.0)
         if external is not None:
             current = external
 

@@ -63,7 +63,7 @@ def load_config(env=None):
         poll_seconds=poll_seconds,
         restore=restore,
         managed=managed,
-        on_polls=_int(env, "ON_DEBOUNCE_POLLS", 2),
+        on_polls=_int(env, "ON_DEBOUNCE_POLLS", 1),
         off_polls=_int(env, "OFF_DEBOUNCE_POLLS", 4),
         watchdog_seconds=watchdog_seconds,
     )

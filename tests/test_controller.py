@@ -1,5 +1,5 @@
 import pytest
-from helpers import DND, IDLE, INVISIBLE, OFFLINE, ONLINE, make_controller
+from helpers import DND, IDLE, INVISIBLE, OFFLINE, ONLINE, FakeClock, make_controller
 
 
 def test_no_edge_returns_none():
@@ -81,18 +81,21 @@ def test_manual_override_releases_control():
 
 
 def test_grace_window_survives_propagation_lag():
-    controller = make_controller(grace_ticks=2)
+    clock = FakeClock()
+    controller = make_controller(grace_seconds=25, clock=clock)
     assert controller.evaluate(True, ONLINE) == IDLE
     assert controller.evaluate(True, ONLINE) is None
     assert controller.holding
+    clock.advance(24)
     assert controller.evaluate(True, ONLINE) is None
     assert controller.holding
+    clock.advance(1)
     assert controller.evaluate(True, ONLINE) is None
     assert not controller.holding
 
 
 def test_hand_back_skipped_when_status_changed_under_us():
-    controller = make_controller(grace_ticks=5)
+    controller = make_controller(grace_seconds=100)
     controller.evaluate(True, ONLINE)
     assert controller.evaluate(False, INVISIBLE) is None
     assert not controller.holding
@@ -111,4 +114,4 @@ def test_release_clears_state():
     controller.release()
     assert not controller.holding
     assert controller.saved is None
-    assert controller.grace == 0
+    assert controller.grace_until == 0.0
