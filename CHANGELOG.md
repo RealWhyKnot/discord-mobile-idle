@@ -19,6 +19,7 @@ starting at 0.
 
 
 
+
 ### Added
 - Add a Windows tray client (2026.9.6.0-E932) (7d74382)
 - Restore the saved status on shutdown (2026.9.6.0-E932) (b46ab2c)
@@ -38,4 +39,5 @@ starting at 0.
 - Keep the commit stamp out of the tracked version file (2026.9.8.0-4260) (97a1460)
 - **tests:** Keep the suite runnable without the runtime dependency (2026.9.17.0-EB82) (9e15d96)
 - Take the phone over again after coming back from offline (2026.9.17.0-EB82) (bf993e1)
+- Restore on shutdown even before the write echoes back (2026.9.17.0-EB82) (e81e6d4)
 
