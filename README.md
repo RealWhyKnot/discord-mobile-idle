@@ -4,14 +4,10 @@
 
 Shows you as idle on Discord while you're on your phone.
 
-Discord puts a phone icon on your avatar when you're on mobile, but it won't change your status, so
-I wrote this.
-
 ## Before you use this
 
 This drives a **user account** with a user token, not a bot account. Discord's Terms of Service
-prohibit automating user accounts, and doing so can get your account terminated. I run it on my own
-account, but use this at your own risk.
+prohibit automating user accounts. Use this at your own risk.
 
 Your token is equivalent to your password, keep it safe.
 
@@ -24,7 +20,7 @@ and copy the `Authorization` request header. That value is the token.
 
 Grab the zip from [Releases](https://github.com/RealWhyKnot/discord-mobile-idle/releases), unpack it
 anywhere, and run `discord-mobile-idle.exe`. It asks for your token once, then lives in the
-notification area with no window. There is nothing to install and no Python needed.
+notification area with no window.
 
 Right-click the tray icon for the menu:
 
@@ -37,33 +33,6 @@ Right-click the tray icon for the menu:
 | Reconnect | Drops the gateway connection and builds a new one. |
 | Check for updates | Looks for a newer release. Once one is downloaded and checked, this becomes Install and restart. |
 | Quit | Restores your status first, then exits. |
-
-The icon is grey while connecting, green once connected, amber while it is holding you on idle, and
-red if your token was rejected.
-
-Everything it keeps lives in `%LOCALAPPDATA%\discord-mobile-idle`:
-
-| File | What it is |
-| --- | --- |
-| `token.bin` | Your token, encrypted so only your Windows account can read it. |
-| `settings.json` | The settings below, same names, written on first use. |
-| `idlebot.log` | Rotating log, three files of 512KB. |
-| `instance.lock` | Held while it runs. A second copy shows a message and exits. |
-| `update.log` | What the updater did the last time it replaced the exe. |
-
-The lock only sees other copies on the same machine. If you also run the container, stop one of
-them: two logins on the same token fight over your status.
-
-If the poll loop ever stalls it reconnects instead of exiting, since there is no supervisor to
-restart it. That covers a hung connection, not a wedged event loop, so if the tray is stuck on grey
-for minutes the fix is Quit and start it again.
-
-It checks for a new release when it starts and once a day after that, and downloads the zip in the
-background so installing is one click. It replaces its own exe in place, so it needs write access to
-its own folder. If you put it somewhere you cannot write, like `Program Files`, the swap is undone
-and it carries on running the version you already had. Set `CHECK_FOR_UPDATES` to `false` if you
-would rather it never phoned home, `UPDATE_CHANNEL` to `beta` to get the nightly builds, or
-`SKIPPED_TAG` to a tag you want it to stop offering.
 
 ## Docker
 
