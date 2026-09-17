@@ -14,12 +14,14 @@ starting at 0.
 
 
 
+
 ### Added
 - Add a Windows tray client (2026.9.6.0-E932) (7d74382)
 - Restore the saved status on shutdown (2026.9.6.0-E932) (b46ab2c)
 - Check for and install new releases from the tray (2026.9.7.0-A528) (5b5280d)
 - Add release selection and integrity parsing for the updater (2026.9.7.0-A528) (f62c1b9)
 - React to session events so idle lands as the phone connects (2026.9.15.0-E86F) (eb82a14)
+- Go offline when nothing else is connected (2026.9.17.0-EB82) (29f3233)
 
 ### Changed
 - Share the Discord adapter between entry points (2026.9.6.0-E932) (c599161)
