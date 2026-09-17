@@ -122,9 +122,9 @@ class Runner:
     async def hand_back(self):
         if self.observe or not self.controller.holding:
             return
-        if self.client.status != self.controller.idle_status:
-            return
         target = self.controller.saved or self.controller.default_restore
+        if self.client.status not in (self.controller.idle_status, target):
+            return
         await self.client.change_presence(status=target, edit_settings=True)
         log.info("restored %s on shutdown", target)
 

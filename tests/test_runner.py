@@ -273,3 +273,26 @@ async def test_hand_back_leaves_a_manual_override_alone():
     await runner.hand_back()
 
     assert client.calls == []
+
+
+async def test_hand_back_restores_when_the_idle_write_has_not_echoed():
+    client = FakeClient(on_mobile=True)
+    runner = make_runner(client)
+    await runner.tick()
+    assert client.calls == [(IDLE, True)]
+
+    client.set_status(ONLINE)
+    await runner.hand_back()
+
+    assert client.calls == [(IDLE, True), (ONLINE, True)]
+
+
+async def test_hand_back_still_refuses_a_status_someone_else_set():
+    client = FakeClient(on_mobile=True)
+    runner = make_runner(client)
+    await runner.tick()
+
+    client.set_status(INVISIBLE)
+    await runner.hand_back()
+
+    assert client.calls == [(IDLE, True)]
