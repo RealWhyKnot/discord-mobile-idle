@@ -9,7 +9,7 @@ import discord
 from .config import ConfigError, load_config
 from .controller import Debouncer, StatusController
 from .discord_client import DiscordClient, start_watchdog
-from .runner import Runner, Watchdog, check_cache_options
+from .runner import Runner, Watchdog, check_cache_options, serve
 
 log = logging.getLogger("idlebot")
 
@@ -76,7 +76,6 @@ def main(argv=None):
         config.poll_seconds,
         observe=args.observe or args.sessions,
     )
-    tasks = []
 
     @client.event
     async def on_ready():
@@ -88,9 +87,9 @@ def main(argv=None):
         if args.sessions:
             await client.close()
             return
-        if tasks:
+        if runner.task is not None:
             return
-        tasks.append(asyncio.create_task(runner.run()))
+        runner.task = asyncio.create_task(runner.run())
         start_watchdog(
             Watchdog(lambda: runner.last_tick, config.watchdog_seconds, lambda: os._exit(1)),
             max(1.0, config.watchdog_seconds / 3.0),
@@ -123,7 +122,7 @@ def main(argv=None):
         config.restore,
     )
     try:
-        client.run(config.token, log_handler=None)
+        asyncio.run(serve(client, runner, config.token))
     except discord.LoginFailure:
         log.error("login failed: DISCORD_TOKEN was rejected")
         return 1

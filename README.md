@@ -46,6 +46,9 @@ docker run -d --name discord-mobile-idle --restart always \
 Only run one instance, here or in the tray app. Two logins on the same token fight over your
 status.
 
+`docker stop` restores your status before the container exits, the same as Quit does in the tray
+app, and so does Ctrl+C when you run it directly. `docker kill` skips it and leaves you on idle.
+
 Without Docker: `pip install -r requirements.txt`, then `DISCORD_TOKEN=... python -m idlebot`.
 
 ## Configuration

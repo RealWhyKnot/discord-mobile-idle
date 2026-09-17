@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import signal
 import time
 
 from .controller import INVISIBLE
@@ -49,6 +50,7 @@ class Runner:
         self.returning = False
         self.transitions = 0
         self.wake = asyncio.Event()
+        self.task = None
         self.started = clock()
         self.last_tick = self.started
         self.last_liveness = self.started
@@ -150,6 +152,45 @@ class Runner:
             self.hidden,
             self.returning,
         )
+
+
+def install_stop_handlers(loop, on_stop):
+    for sig in (signal.SIGINT, signal.SIGTERM):
+        try:
+            loop.add_signal_handler(sig, on_stop)
+        except NotImplementedError:
+            signal.signal(sig, lambda *_: loop.call_soon_threadsafe(on_stop))
+
+
+async def close_session(runner, close):
+    task = runner.task
+    if task is not None:
+        runner.task = None
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+    try:
+        await runner.hand_back()
+    except Exception:
+        log.exception("could not restore the status on the way out")
+    await close()
+
+
+async def serve(client, runner, token):
+    stop = asyncio.Event()
+    install_stop_handlers(asyncio.get_running_loop(), stop.set)
+    session = asyncio.create_task(client.start(token))
+    stopping = asyncio.create_task(stop.wait())
+    try:
+        await asyncio.wait((session, stopping), return_when=asyncio.FIRST_COMPLETED)
+        if not session.done():
+            log.info("stop requested")
+            await close_session(runner, client.close)
+        await session
+    finally:
+        stopping.cancel()
 
 
 class Watchdog:

@@ -6,7 +6,7 @@ import discord
 
 from ..controller import IDLE, Debouncer, StatusController
 from ..discord_client import DiscordClient, start_watchdog
-from ..runner import Runner, Watchdog, check_cache_options
+from ..runner import Runner, Watchdog, check_cache_options, close_session
 
 log = logging.getLogger("idlebot")
 
@@ -40,7 +40,6 @@ class Service:
         self.loop = None
         self.client = None
         self.runner = None
-        self.task = None
         self.stopping = False
         self._retry = asyncio.Event()
 
@@ -112,16 +111,15 @@ class Service:
         )
         self.client = client
         self.runner = runner
-        self.task = None
 
         @client.event
         async def on_ready():
             self.on_state("active", "connected as %s" % client.user)
             debouncer.reset()
             runner.last_tick = runner.clock()
-            if self.task is not None:
+            if runner.task is not None:
                 return
-            self.task = asyncio.create_task(runner.run())
+            runner.task = asyncio.create_task(runner.run())
             start_watchdog(
                 Watchdog(lambda: runner.last_tick, self.config.watchdog_seconds, lambda: self._stall(client)),
                 max(1.0, self.config.watchdog_seconds / 3.0),
@@ -150,7 +148,6 @@ class Service:
         finally:
             self.client = None
             self.runner = None
-            self.task = None
 
     def _hidden(self, status):
         if status is None:
@@ -184,16 +181,4 @@ class Service:
         client = self.client
         if client is None:
             return
-        if self.task is not None:
-            self.task.cancel()
-            try:
-                await self.task
-            except asyncio.CancelledError:
-                pass
-            self.task = None
-        if self.runner is not None:
-            try:
-                await self.runner.hand_back()
-            except Exception:
-                log.exception("could not restore the status on the way out")
-        await client.close()
+        await close_session(self.runner, client.close)
