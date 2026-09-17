@@ -11,12 +11,25 @@ class DiscordClient:
     def is_on_mobile(self):
         return self._client.is_on_mobile()
 
+    def other_sessions(self):
+        return sum(1 for s in self._client.sessions if not s.is_overall() and not s.is_current())
+
     @property
     def status(self):
         return str(self._client.status)
 
+    @property
+    def saved_status(self):
+        return str(self._client.settings.status)
+
     async def change_presence(self, *, status, edit_settings=True):
         await self._client.change_presence(status=discord.Status(status), edit_settings=edit_settings)
+
+    async def hide(self):
+        await self._client.change_presence(status=discord.Status.invisible, edit_settings=False)
+
+    async def unhide(self, status):
+        await self._client.change_presence(status=discord.Status(status), edit_settings=False)
 
 
 def start_watchdog(watchdog, interval):

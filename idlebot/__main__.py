@@ -27,11 +27,13 @@ def write_ready():
 def log_sessions(client):
     try:
         for session in client.sessions:
-            log.info(
-                "session client=%s status=%s",
-                getattr(session, "client", "?"),
-                getattr(session, "status", "?"),
-            )
+            if session.is_overall():
+                label = "rollup"
+            elif session.is_current():
+                label = "this bot"
+            else:
+                label = str(session.client)
+            log.info("session %s status=%s", label, session.status)
     except Exception:
         log.exception("could not read sessions")
 
@@ -62,6 +64,7 @@ def main(argv=None):
         max_messages=None,
         guild_subscriptions=False,
         member_cache_flags=discord.MemberCacheFlags.none(),
+        sync_presence=False,
     )
     check_cache_options(client._connection)
     controller = StatusController(config.restore, config.managed)

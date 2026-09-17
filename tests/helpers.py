@@ -13,18 +13,28 @@ OFFLINE = "offline"
 
 
 class FakeClient:
-    def __init__(self, status=ONLINE, on_mobile=False):
+    def __init__(self, status=ONLINE, on_mobile=False, others=1, saved=None):
         self._status = status
         self._on_mobile = on_mobile
+        self.others = others
+        self.saved = status if saved is None else saved
         self.calls = []
+        self.presence = []
         self.raises = None
 
     def is_on_mobile(self):
         return self._on_mobile
 
+    def other_sessions(self):
+        return self.others
+
     @property
     def status(self):
         return self._status
+
+    @property
+    def saved_status(self):
+        return self.saved
 
     def set_mobile(self, value):
         self._on_mobile = value
@@ -36,6 +46,14 @@ class FakeClient:
         self.calls.append((status, edit_settings))
         if self.raises is not None:
             raise self.raises
+        self._status = status
+
+    async def hide(self):
+        self.presence.append(INVISIBLE)
+        self._status = INVISIBLE
+
+    async def unhide(self, status):
+        self.presence.append(status)
         self._status = status
 
 

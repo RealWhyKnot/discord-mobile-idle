@@ -15,13 +15,22 @@ BACKOFF_MAX = 300
 
 
 class NotifyingClient(DiscordClient):
-    def __init__(self, client, on_write):
+    def __init__(self, client, on_write, on_hidden):
         super().__init__(client)
         self._on_write = on_write
+        self._on_hidden = on_hidden
 
     async def change_presence(self, *, status, edit_settings=True):
         await super().change_presence(status=status, edit_settings=edit_settings)
         self._on_write(status)
+
+    async def hide(self):
+        await super().hide()
+        self._on_hidden(None)
+
+    async def unhide(self, status):
+        await super().unhide(status)
+        self._on_hidden(status)
 
 
 class Service:
@@ -91,11 +100,12 @@ class Service:
             max_messages=None,
             guild_subscriptions=False,
             member_cache_flags=discord.MemberCacheFlags.none(),
+            sync_presence=False,
         )
         check_cache_options(client._connection)
         debouncer = Debouncer(self.config.on_polls, self.config.off_polls)
         runner = Runner(
-            NotifyingClient(client, self._wrote),
+            NotifyingClient(client, self._wrote, self._hidden),
             StatusController(self.config.restore, self.config.managed),
             debouncer,
             self.config.poll_seconds,
@@ -141,6 +151,12 @@ class Service:
             self.client = None
             self.runner = None
             self.task = None
+
+    def _hidden(self, status):
+        if status is None:
+            self.on_state("active", "offline while nothing else is connected")
+        else:
+            self.on_state("active", "back to %s" % status)
 
     def _wrote(self, status):
         if status == IDLE:

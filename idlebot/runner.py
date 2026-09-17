@@ -39,6 +39,7 @@ class Runner:
         self.clock = clock
         self.pending = None
         self.simulated = None
+        self.hidden = False
         self.transitions = 0
         self.wake = asyncio.Event()
         self.started = clock()
@@ -57,6 +58,32 @@ class Runner:
         self.wake.clear()
 
     async def tick(self):
+        others = self.client.other_sessions()
+        if self.hidden:
+            if others:
+                await self._unhide()
+            return
+        await self._manage()
+        if not others and not self.controller.holding and not self.debouncer.stable:
+            await self._hide()
+
+    async def _hide(self):
+        if not self.observe:
+            await self.client.hide()
+        self.hidden = True
+        log.info("nobody connected, going offline")
+
+    async def _unhide(self):
+        target = self.client.saved_status
+        if target == "unknown":
+            target = self.controller.default_restore
+        if not self.observe:
+            await self.client.unhide(target)
+        self.hidden = False
+        self.wake.set()
+        log.info("something connected, coming back as %s", target)
+
+    async def _manage(self):
         raw = self.client.is_on_mobile()
         stable = self.debouncer.update(raw)
         current = self.client.status if self.simulated is None else self.simulated
