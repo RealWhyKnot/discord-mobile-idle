@@ -1,5 +1,7 @@
 from helpers import DND, IDLE, INVISIBLE, ONLINE, FakeClient, drive, make_runner
 
+from idlebot.runner import count_other_sessions
+
 
 async def test_goes_offline_when_nothing_else_is_connected():
     client = FakeClient(others=0)
@@ -104,3 +106,33 @@ async def test_observe_mode_writes_nothing_either_way():
     await runner.tick()
     assert client.presence == []
     assert runner.hidden is False
+
+
+class FakeSession:
+    def __init__(self, overall=False, current=False):
+        self._overall = overall
+        self._current = current
+
+    def is_overall(self):
+        return self._overall
+
+    def is_current(self):
+        return self._current
+
+
+def test_the_rollup_and_our_own_login_are_not_counted():
+    sessions = [
+        FakeSession(overall=True),
+        FakeSession(current=True),
+        FakeSession(),
+        FakeSession(),
+    ]
+    assert count_other_sessions(sessions) == 2
+
+
+def test_being_the_only_login_counts_as_nothing_connected():
+    assert count_other_sessions([FakeSession(overall=True), FakeSession(current=True)]) == 0
+
+
+def test_an_empty_session_list_counts_as_nothing_connected():
+    assert count_other_sessions([]) == 0

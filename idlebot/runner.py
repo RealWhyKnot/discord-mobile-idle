@@ -29,6 +29,10 @@ def check_cache_options(state):
     return problems
 
 
+def count_other_sessions(sessions):
+    return sum(1 for s in sessions if not s.is_overall() and not s.is_current())
+
+
 class Runner:
     def __init__(self, client, controller, debouncer, poll_seconds, observe=False, clock=time.monotonic):
         self.client = client

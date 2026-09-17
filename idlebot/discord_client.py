@@ -3,6 +3,8 @@ import time
 
 import discord
 
+from .runner import count_other_sessions
+
 
 class DiscordClient:
     def __init__(self, client):
@@ -12,7 +14,7 @@ class DiscordClient:
         return self._client.is_on_mobile()
 
     def other_sessions(self):
-        return sum(1 for s in self._client.sessions if not s.is_overall() and not s.is_current())
+        return count_other_sessions(self._client.sessions)
 
     @property
     def status(self):
