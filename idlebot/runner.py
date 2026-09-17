@@ -2,6 +2,8 @@ import asyncio
 import logging
 import time
 
+from .controller import INVISIBLE
+
 log = logging.getLogger("idlebot")
 
 LIVENESS_SECONDS = 1800
@@ -44,6 +46,7 @@ class Runner:
         self.pending = None
         self.simulated = None
         self.hidden = False
+        self.returning = False
         self.transitions = 0
         self.wake = asyncio.Event()
         self.started = clock()
@@ -67,6 +70,10 @@ class Runner:
             if others:
                 await self._unhide()
             return
+        if self.returning:
+            if self.client.status == INVISIBLE:
+                return
+            self.returning = False
         await self._manage()
         if not others and not self.controller.holding and not self.debouncer.stable:
             await self._hide()
@@ -84,7 +91,7 @@ class Runner:
         if not self.observe:
             await self.client.unhide(target)
         self.hidden = False
-        self.wake.set()
+        self.returning = True
         log.info("something connected, coming back as %s", target)
 
     async def _manage(self):
@@ -135,11 +142,13 @@ class Runner:
             return
         self.last_liveness = now
         log.info(
-            "alive uptime=%.0fs transitions=%d on_mobile=%s holding=%s",
+            "alive uptime=%.0fs transitions=%d on_mobile=%s holding=%s hidden=%s returning=%s",
             now - self.started,
             self.transitions,
             self.debouncer.stable,
             self.controller.holding,
+            self.hidden,
+            self.returning,
         )
 
 

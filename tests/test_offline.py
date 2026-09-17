@@ -94,6 +94,42 @@ async def test_never_goes_offline_while_the_phone_still_reads_connected():
     assert runner.hidden is False
 
 
+async def test_the_phone_is_still_taken_over_after_coming_back():
+    client = FakeClient(others=0)
+    runner = make_runner(client)
+    await runner.tick()
+    assert client.presence == [INVISIBLE]
+
+    client.echo = False
+    client.set_mobile(True)
+    client.others = 1
+    await runner.tick()
+    assert client.presence == [INVISIBLE, ONLINE]
+    assert client.calls == []
+
+    await runner.tick()
+    assert client.calls == []
+    assert runner.controller.on_mobile is False
+
+    client.settle()
+    await runner.tick()
+    assert client.calls == [(IDLE, True)]
+
+
+async def test_a_status_chosen_while_away_is_not_overwritten_on_return():
+    client = FakeClient(others=0, echo=False)
+    runner = make_runner(client, managed=(ONLINE,))
+    await runner.tick()
+
+    client.others = 1
+    await runner.tick()
+    client._status = DND
+
+    await runner.tick()
+    assert runner.returning is False
+    assert client.calls == []
+
+
 async def test_observe_mode_writes_nothing_either_way():
     client = FakeClient(others=0)
     runner = make_runner(client, observe=True)

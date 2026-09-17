@@ -13,11 +13,12 @@ OFFLINE = "offline"
 
 
 class FakeClient:
-    def __init__(self, status=ONLINE, on_mobile=False, others=1, saved=None):
+    def __init__(self, status=ONLINE, on_mobile=False, others=1, saved=None, echo=True):
         self._status = status
         self._on_mobile = on_mobile
         self.others = others
         self.saved = status if saved is None else saved
+        self.echo = echo
         self.calls = []
         self.presence = []
         self.raises = None
@@ -54,7 +55,11 @@ class FakeClient:
 
     async def unhide(self, status):
         self.presence.append(status)
-        self._status = status
+        if self.echo:
+            self._status = status
+
+    def settle(self):
+        self._status = self.presence[-1]
 
 
 class FakeClock:
