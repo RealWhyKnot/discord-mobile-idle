@@ -1,35 +1,24 @@
 #!/usr/bin/env python3
-"""
-Append-on-push CHANGELOG maintenance for whyknot-yt-dlp-plugins.
-
-Spirit-port of WKVRCProxy/.github/scripts/Update-Changelog.ps1's Append mode.
-Walks the commits in --range, buckets by conventional-commit type, and merges
-into the "## Unreleased" section of CHANGELOG.md. Skips merge commits, bot
-commits, "[skip changelog]" subjects, and types that aren't user-visible
-(docs/build/ci/test/non-deps chore).
-
-Differences from the WKVRCProxy version:
-  - No build-stamp regex strip (no prepare-commit-msg hook in this repo)
-  - Promote/Notes modes deferred -- release.yml inlines that logic
-
-Invoked by .github/workflows/changelog-append.yml. Idempotent: re-running
-against the same range is a no-op (de-duped by short-sha in existing bullets).
-"""
-
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 CHANGELOG = Path("CHANGELOG.md")
+DEFAULT_REPO = "RealWhyKnot/discord-mobile-idle"
 BUCKET_ORDER = ["Breaking", "Added", "Changed", "Fixed"]
 CONVENTIONAL = re.compile(
     r"^(?P<type>feat|fix|perf|refactor|docs|build|ci|chore|test|revert)"
     r"(?:\((?P<scope>[^)]+)\))?(?P<bang>!)?:\s+(?P<desc>.+)$"
 )
+UNRELEASED = re.compile(r"(?m)^## +Unreleased[ \t]*$")
+SECTION_END = re.compile(r"(?m)^(---|## )")
+HAS_ENTRIES = re.compile(r"(?m)^(### |- )")
 
 
 def parse_subject(sha: str, subject: str) -> tuple[str, str] | None:
@@ -85,8 +74,6 @@ def parse_existing_body(body: str) -> dict[str, list[str]]:
 
 def render_body(buckets: dict[str, list[str]]) -> str:
     """Render bucket map back to markdown body."""
-    if not any(buckets.values()):
-        return "\n_No notable changes since the last release._\n"
     out: list[str] = [""]
     emitted: set[str] = set()
     for name in BUCKET_ORDER:
@@ -103,13 +90,18 @@ def render_body(buckets: dict[str, list[str]]) -> str:
     return "\n".join(out) + "\n"
 
 
-def main() -> int:
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--range", required=True, help="git-log range (e.g. abc..def)")
-    args = parser.parse_args()
+def find_unreleased(text: str) -> tuple[int, int, int]:
+    m = UNRELEASED.search(text)
+    if not m:
+        raise LookupError("CHANGELOG.md missing '## Unreleased' heading")
+    tail = text[m.end() :]
+    end_m = SECTION_END.search(tail)
+    return m.start(), m.end(), m.end() + (end_m.start() if end_m else len(tail))
 
+
+def append(rev_range: str) -> int:
     log = subprocess.run(
-        ["git", "log", "--no-merges", "--format=%H%x09%s", args.range],
+        ["git", "log", "--no-merges", "--format=%H%x09%s", rev_range],
         check=True,
         capture_output=True,
         text=True,
@@ -131,19 +123,9 @@ def main() -> int:
         return 0
 
     text = CHANGELOG.read_text(encoding="utf-8")
-    m = re.search(r"(?m)^## +Unreleased\s*$", text)
-    if not m:
-        print("CHANGELOG.md missing '## Unreleased' heading", file=sys.stderr)
-        return 1
-    start = m.end()
-    tail = text[start:]
-    end_m = re.search(r"(?m)^(---|## )", tail)
-    end = start + (end_m.start() if end_m else len(tail))
+    _, start, end = find_unreleased(text)
+    existing = parse_existing_body(text[start:end].strip("\n"))
 
-    existing_body = text[start:end].strip("\n")
-    existing = parse_existing_body(existing_body)
-
-    # Merge: append new bullets into existing buckets, dedupe by short-sha.
     sha_re = re.compile(r"\(([a-f0-9]{7})\)\s*$")
     for bucket, bullets in new.items():
         existing.setdefault(bucket, [])
@@ -154,10 +136,46 @@ def main() -> int:
                 continue
             existing[bucket].append(b)
 
-    new_body = render_body(existing)
-    CHANGELOG.write_text(text[:start] + "\n" + new_body + text[end:], encoding="utf-8")
+    CHANGELOG.write_text(text[:start] + "\n" + render_body(existing) + text[end:], encoding="utf-8", newline="\n")
     print("Updated CHANGELOG.md")
     return 0
+
+
+def promote(version: str) -> int:
+    text = CHANGELOG.read_text(encoding="utf-8")
+    if re.search(rf"(?m)^## \[{re.escape(version)}\]", text):
+        print(f"{version} already has a section; nothing to promote.")
+        return 0
+
+    head, start, end = find_unreleased(text)
+    body = text[start:end].strip("\n")
+    if not HAS_ENTRIES.search(body):
+        body = "_No user-visible changes in this release._"
+
+    repo = os.environ.get("GITHUB_REPOSITORY") or DEFAULT_REPO
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    heading = f"## [{version}](https://github.com/{repo}/releases/tag/{version}) - {date}"
+    rolled = f"## Unreleased\n\n_No notable changes since the last release._\n\n---\n\n{heading}\n\n{body}\n"
+    rest = text[end:]
+    CHANGELOG.write_text(text[:head] + rolled + (f"\n{rest}" if rest else ""), encoding="utf-8", newline="\n")
+    print(f"Promoted Unreleased to {version}.")
+    return 0
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--range", dest="rev_range", help="git-log range to append (e.g. abc..def)")
+    mode.add_argument("--promote", metavar="VERSION", help="roll Unreleased into a section for this tag")
+    args = parser.parse_args()
+
+    try:
+        if args.promote:
+            return promote(args.promote)
+        return append(args.rev_range)
+    except LookupError as exc:
+        print(exc, file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

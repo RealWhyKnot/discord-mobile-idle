@@ -127,3 +127,24 @@ jobs:
           assets: |
             ${{ steps.package.outputs.zip }}
             ${{ steps.package.outputs.integrity }}
+
+      - name: Roll Unreleased into the released section
+        if: steps.release_tag.outputs.prerelease == 'false'
+        shell: pwsh
+        run: |
+          git fetch --no-tags origin main
+          if ($LASTEXITCODE -ne 0) { throw "git fetch failed ($LASTEXITCODE)" }
+          git checkout FETCH_HEAD -- CHANGELOG.md
+          if ($LASTEXITCODE -ne 0) { throw "git checkout failed ($LASTEXITCODE)" }
+          $global:LASTEXITCODE = 0
+          & ./.github/scripts/Update-Changelog.ps1 -Mode Promote -Version '${{ steps.release_tag.outputs.tag }}'
+          if ($LASTEXITCODE -ne 0) { throw "Update-Changelog.ps1 failed ($LASTEXITCODE)" }
+
+      - name: Commit the rolled changelog
+        if: steps.release_tag.outputs.prerelease == 'false'
+        uses: RealWhyKnot/workflows/commit-on-branch@v1
+        with:
+          headline: 'docs(changelog): promote Unreleased to ${{ steps.release_tag.outputs.tag }} [skip changelog]'
+          body: Rolled by the release workflow when the tag was published.
+          branch: main
+          paths: CHANGELOG.md

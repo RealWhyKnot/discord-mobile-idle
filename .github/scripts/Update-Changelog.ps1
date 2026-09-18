@@ -2,10 +2,10 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true)]
-    [ValidateSet('Append')]
+    [ValidateSet('Append', 'Promote')]
     [string] $Mode,
-    [Parameter(Mandatory = $true)]
-    [string] $Range
+    [string] $Range,
+    [string] $Version
 )
 
 $ErrorActionPreference = 'Stop'
@@ -17,5 +17,13 @@ foreach ($candidate in @('python3', 'python', 'py')) {
 }
 if (-not $python) { throw 'No python interpreter on PATH.' }
 
-& $python (Join-Path $PSScriptRoot 'update_changelog.py') --range $Range
+if ($Mode -eq 'Promote') {
+    if (-not $Version) { throw 'Promote mode needs -Version, for example v2026.9.18.0.' }
+    $scriptArgs = @('--promote', $Version)
+} else {
+    if (-not $Range) { throw 'Append mode needs -Range, for example abc123..def456.' }
+    $scriptArgs = @('--range', $Range)
+}
+
+& $python (Join-Path $PSScriptRoot 'update_changelog.py') @scriptArgs
 if ($LASTEXITCODE -ne 0) { throw "update_changelog.py failed ($LASTEXITCODE)" }
