@@ -95,14 +95,17 @@ jobs:
           Copy-Item README.md, LICENSE $stage
           $zip = "dist/discord-mobile-idle-$version.zip"
           Compress-Archive -Path "$stage/*" -DestinationPath $zip -Force
-          $hash = (Get-FileHash $zip -Algorithm SHA256).Hash
-          $lines = @("$hash`t$((Get-Item $zip).Length)`t$(Split-Path $zip -Leaf)")
-          $integrity = "dist/discord-mobile-idle-$version.integrity.tsv"
-          [System.IO.File]::WriteAllLines($integrity, [string[]]$lines, [System.Text.UTF8Encoding]::new($false))
           "zip=$zip" >> $env:GITHUB_OUTPUT
           "name=$(Split-Path $zip -Leaf)" >> $env:GITHUB_OUTPUT
-          "sha256=$hash" >> $env:GITHUB_OUTPUT
-          "integrity=$integrity" >> $env:GITHUB_OUTPUT
+          "stage=$stage" >> $env:GITHUB_OUTPUT
+          "integrity=dist/discord-mobile-idle-$version.integrity.tsv" >> $env:GITHUB_OUTPUT
+
+      - name: Checksums
+        id: checksums
+        uses: RealWhyKnot/workflows/checksums@v1
+        with:
+          archives: ${{ steps.package.outputs.zip }}
+          contents: ${{ steps.package.outputs.stage }}
 
       - name: Build release notes
         id: notes
@@ -115,7 +118,7 @@ jobs:
 
             - `${{ steps.package.outputs.name }}` holds the Windows tray app. Unpack it anywhere and run the exe; no Python needed.
             - The Docker image is built from this repository, see the readme.
-            - SHA256 of the zip: `${{ steps.package.outputs.sha256 }}`
+            - SHA256 of the zip: `${{ steps.checksums.outputs.sha256 }}`
             - Hashes for every file are in the attached `.integrity.tsv`.
 
       - name: Create GitHub release
