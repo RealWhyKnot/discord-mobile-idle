@@ -8,7 +8,8 @@ starting at 0.
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Changed
+- **release:** Hash the zip with the shared checksums action (2026.9.18.0-2D46) (38ee728)
 
 ---
 
