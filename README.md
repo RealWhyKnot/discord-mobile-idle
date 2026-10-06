@@ -26,6 +26,9 @@ Grab the zip from [Releases](https://github.com/RealWhyKnot/discord-mobile-idle/
 anywhere, and run `discord-mobile-idle.exe`. It asks for your token once, then lives in the
 notification area with no window.
 
+The exe isn't code-signed, so SmartScreen may stop the first launch. Click More info, then Run
+anyway.
+
 Right-click the tray icon for the menu:
 
 | Item | What it does |
@@ -40,8 +43,10 @@ Right-click the tray icon for the menu:
 
 ## Docker
 
+Docker builds it straight from this repo, no clone needed:
+
 ```
-docker build -t discord-mobile-idle .
+docker build -t discord-mobile-idle https://github.com/RealWhyKnot/discord-mobile-idle.git
 docker run -d --name discord-mobile-idle --restart always \
     -e DISCORD_TOKEN=your_token_here \
     discord-mobile-idle
@@ -53,7 +58,8 @@ status.
 `docker stop` restores your status before the container exits, the same as Quit does in the tray
 app, and so does Ctrl+C when you run it directly. `docker kill` skips it and leaves you on idle.
 
-Without Docker: `pip install -r requirements.txt`, then `DISCORD_TOKEN=... python -m idlebot`.
+Without Docker you need Python 3.10 or newer. Clone the repo, `pip install -r requirements.txt`,
+then `DISCORD_TOKEN=... python -m idlebot`.
 
 ## Configuration
 
