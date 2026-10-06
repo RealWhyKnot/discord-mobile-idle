@@ -4,6 +4,10 @@
 
 Shows you as idle on Discord while you're on your phone.
 
+It also goes offline for you when no other client is connected, and it leaves your status alone
+entirely while you've set yourself invisible or offline, on any device. Pick a visible status again
+and it picks up where it left off.
+
 ## Before you use this
 
 This drives a **user account** with a user token, not a bot account. Discord's Terms of Service

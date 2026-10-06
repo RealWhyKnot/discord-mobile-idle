@@ -3,11 +3,13 @@ import logging
 import signal
 import time
 
-from .controller import INVISIBLE
+from .controller import INVISIBLE, OFFLINE
 
 log = logging.getLogger("idlebot")
 
 LIVENESS_SECONDS = 1800
+UNKNOWN = "unknown"
+HIDDEN_STATUSES = frozenset({INVISIBLE, OFFLINE})
 
 EXPECTED_CACHE = (
     ("max_messages", None),
@@ -48,6 +50,9 @@ class Runner:
         self.simulated = None
         self.hidden = False
         self.returning = False
+        self.stood_down = False
+        self.user_status = None
+        self.setting_echo = None
         self.transitions = 0
         self.wake = asyncio.Event()
         self.task = None
@@ -59,6 +64,21 @@ class Runner:
         if self.client.is_on_mobile() and not self.debouncer.stable:
             self.wake.set()
 
+    def seed_user_status(self):
+        status = self.client.saved_status
+        if status != UNKNOWN:
+            self.user_status = status
+
+    def note_settings(self, status):
+        if status == self.setting_echo:
+            self.setting_echo = None
+            return
+        self.user_status = status
+        self.wake.set()
+
+    def wants_hidden(self):
+        return self.user_status in HIDDEN_STATUSES
+
     async def wait_for_wake(self):
         try:
             await asyncio.wait_for(self.wake.wait(), self.poll_seconds)
@@ -67,6 +87,11 @@ class Runner:
         self.wake.clear()
 
     async def tick(self):
+        if self.wants_hidden():
+            await self._stand_down()
+            return
+        if self.stood_down:
+            await self._stand_up()
         others = self.client.other_sessions()
         if self.hidden:
             if others:
@@ -80,6 +105,25 @@ class Runner:
         if not others and not self.controller.holding and not self.debouncer.stable:
             await self._hide()
 
+    async def _stand_down(self):
+        if self.stood_down:
+            return
+        self.controller.stand_down()
+        self.hidden = False
+        self.returning = False
+        if not self.observe:
+            await self.client.hide()
+        self.stood_down = True
+        log.info("you set %s, leaving your status alone", self.user_status)
+
+    async def _stand_up(self):
+        self.stood_down = False
+        self.debouncer.reset()
+        if not self.observe:
+            await self.client.unhide(self.user_status)
+        self.returning = True
+        log.info("you set %s, managing again", self.user_status)
+
     async def _hide(self):
         if not self.observe:
             await self.client.hide()
@@ -88,7 +132,7 @@ class Runner:
 
     async def _unhide(self):
         target = self.client.saved_status
-        if target == "unknown":
+        if target == UNKNOWN:
             target = self.controller.default_restore
         if not self.observe:
             await self.client.unhide(target)
@@ -115,6 +159,7 @@ class Runner:
             self.pending = None
             return
         await self.client.change_presence(status=self.pending, edit_settings=True)
+        self.setting_echo = self.pending
         self.transitions += 1
         log.info("status %s -> %s (on_mobile=%s)", current, self.pending, stable)
         self.pending = None
@@ -126,6 +171,7 @@ class Runner:
         if self.client.status not in (self.controller.idle_status, target):
             return
         await self.client.change_presence(status=target, edit_settings=True)
+        self.setting_echo = target
         log.info("restored %s on shutdown", target)
 
     async def run(self):
@@ -144,13 +190,14 @@ class Runner:
             return
         self.last_liveness = now
         log.info(
-            "alive uptime=%.0fs transitions=%d on_mobile=%s holding=%s hidden=%s returning=%s",
+            "alive uptime=%.0fs transitions=%d on_mobile=%s holding=%s hidden=%s returning=%s you=%s",
             now - self.started,
             self.transitions,
             self.debouncer.stable,
             self.controller.holding,
             self.hidden,
             self.returning,
+            self.user_status,
         )
 
 

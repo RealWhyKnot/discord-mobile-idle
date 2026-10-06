@@ -83,6 +83,7 @@ def main(argv=None):
         log_sessions(client)
         write_ready()
         debouncer.reset()
+        runner.seed_user_status()
         runner.last_tick = runner.clock()
         if args.sessions:
             await client.close()
@@ -113,6 +114,10 @@ def main(argv=None):
     @client.event
     async def on_session_delete(session):
         runner.wake_if_mobile()
+
+    @client.event
+    async def on_settings_update(before, after):
+        runner.note_settings(str(after.status))
 
     log.info(
         "starting observe=%s poll=%ds managed=%s restore=%s",

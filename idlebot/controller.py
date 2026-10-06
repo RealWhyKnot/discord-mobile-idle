@@ -58,6 +58,10 @@ class StatusController:
         self.saved = None
         self.grace_until = 0.0
 
+    def stand_down(self):
+        self.release()
+        self.on_mobile = False
+
 
 class Debouncer:
     def __init__(self, on_polls, off_polls, initial=False):

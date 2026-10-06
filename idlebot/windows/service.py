@@ -116,6 +116,7 @@ class Service:
         async def on_ready():
             self.on_state("active", "connected as %s" % client.user)
             debouncer.reset()
+            runner.seed_user_status()
             runner.last_tick = runner.clock()
             if runner.task is not None:
                 return
@@ -143,6 +144,10 @@ class Service:
         async def on_session_delete(session):
             runner.wake_if_mobile()
 
+        @client.event
+        async def on_settings_update(before, after):
+            runner.note_settings(str(after.status))
+
         try:
             await client.start(self.config.token)
         finally:
@@ -150,10 +155,12 @@ class Service:
             self.runner = None
 
     def _hidden(self, status):
-        if status is None:
-            self.on_state("active", "offline while nothing else is connected")
-        else:
+        if status is not None:
             self.on_state("active", "back to %s" % status)
+        elif self.runner is not None and self.runner.wants_hidden():
+            self.on_state("active", "leaving your status alone")
+        else:
+            self.on_state("active", "offline while nothing else is connected")
 
     def _wrote(self, status):
         if status == IDLE:
