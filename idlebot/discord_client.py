@@ -22,7 +22,16 @@ class DiscordClient:
 
     @property
     def saved_status(self):
-        return str(self._client.settings.status)
+        settings = self._client.settings
+        return "unknown" if settings is None else str(settings.status)
+
+    @property
+    def own_status(self):
+        session = self._client._connection.current_session
+        return None if session is None else str(session.status)
+
+    async def check_token(self):
+        await self._client.http.get_me(with_analytics_token=False)
 
     async def change_presence(self, *, status, edit_settings=True):
         await self._client.change_presence(status=discord.Status(status), edit_settings=edit_settings)

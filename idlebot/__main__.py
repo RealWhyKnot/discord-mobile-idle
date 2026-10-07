@@ -3,17 +3,21 @@ import asyncio
 import logging
 import os
 import sys
+import tempfile
+import time
 
 import discord
 
 from .config import ConfigError, load_config
 from .controller import Debouncer, StatusController
 from .discord_client import DiscordClient, start_watchdog
+from .persist import HoldMarker, StartLog, start_delay
 from .runner import Runner, Watchdog, check_afk, check_cache_options, serve
 
 log = logging.getLogger("idlebot")
 
 READY_FILE = os.environ.get("READY_FILE", "/tmp/ready")
+STATE_DIR = os.environ.get("STATE_DIR", tempfile.gettempdir())
 
 
 def write_ready():
@@ -77,7 +81,12 @@ def main(argv=None):
         debouncer,
         config.poll_seconds,
         observe=args.observe or args.sessions,
+        marker=HoldMarker(os.path.join(STATE_DIR, "idlebot-hold")),
     )
+    starts = StartLog(os.path.join(STATE_DIR, "idlebot-starts"))
+    now = time.time()
+    delay, recent = start_delay(starts.load(), now)
+    starts.save(recent + [now + delay])
 
     @client.event
     async def on_ready():
@@ -85,7 +94,10 @@ def main(argv=None):
         log_sessions(client)
         write_ready()
         debouncer.reset()
+        if runner.task is None:
+            runner.recover()
         runner.seed_user_status()
+        runner.note_connected()
         runner.last_tick = runner.clock()
         if args.sessions:
             await client.close()
@@ -102,8 +114,13 @@ def main(argv=None):
     async def on_resumed():
         log.info("gateway resumed")
         debouncer.reset()
+        runner.note_connected()
         runner.last_tick = runner.clock()
         runner.wake_if_mobile()
+
+    @client.event
+    async def on_disconnect():
+        runner.note_disconnected()
 
     @client.event
     async def on_session_create(session):
@@ -129,11 +146,13 @@ def main(argv=None):
         config.restore,
     )
     try:
-        asyncio.run(serve(client, runner, config.token))
+        return asyncio.run(serve(client, runner, config.token, delay))
     except discord.LoginFailure:
         log.error("login failed: DISCORD_TOKEN was rejected")
         return 1
-    return 0
+    except Exception:
+        log.exception("the Discord session ended with an error")
+        return 1
 
 
 if __name__ == "__main__":

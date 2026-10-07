@@ -53,6 +53,12 @@ class StatusController:
             return None
         return target
 
+    def resume_hold(self, saved):
+        self.on_mobile = True
+        self.holding = True
+        self.saved = saved
+        self.grace_until = self.clock() + self.grace_seconds
+
     def release(self):
         self.holding = False
         self.saved = None
@@ -92,3 +98,7 @@ class Debouncer:
     def reset(self):
         self.pending = self.stable
         self.count = 0
+
+    def force(self, value):
+        self.stable = value
+        self.reset()

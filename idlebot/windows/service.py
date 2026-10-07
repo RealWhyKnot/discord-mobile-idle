@@ -1,12 +1,15 @@
 import asyncio
 import logging
 import threading
+import time
 
 import discord
 
 from ..controller import IDLE, Debouncer, StatusController
 from ..discord_client import DiscordClient, start_watchdog
-from ..runner import Runner, Watchdog, check_afk, check_cache_options, close_session
+from ..persist import HoldMarker, start_delay
+from ..runner import Runner, Watchdog, abandon_session, check_afk, check_cache_options, close_session
+from . import store
 
 log = logging.getLogger("idlebot")
 
@@ -41,6 +44,7 @@ class Service:
         self.client = None
         self.runner = None
         self.stopping = False
+        self.starts = []
         self._retry = asyncio.Event()
 
     def start(self):
@@ -70,6 +74,17 @@ class Service:
     async def _supervise(self):
         delay = BACKOFF_START
         while not self.stopping:
+            pause, self.starts = start_delay(self.starts, time.time())
+            if pause:
+                self.on_state("connecting", "reconnected too often, waiting %ds" % pause)
+                try:
+                    await asyncio.wait_for(self._retry.wait(), pause)
+                    self._retry.clear()
+                except asyncio.TimeoutError:
+                    pass
+                if self.stopping:
+                    return
+            self.starts.append(time.time())
             self.on_state("connecting", "connecting")
             try:
                 await self._session()
@@ -110,7 +125,9 @@ class Service:
             StatusController(self.config.restore, self.config.managed),
             debouncer,
             self.config.poll_seconds,
+            marker=HoldMarker(store.path_for("hold")),
         )
+        runner.on_fatal = lambda reason: self._abandon(client, reason)
         self.client = client
         self.runner = runner
 
@@ -118,7 +135,10 @@ class Service:
         async def on_ready():
             self.on_state("active", "connected as %s" % client.user)
             debouncer.reset()
+            if runner.task is None:
+                runner.recover()
             runner.seed_user_status()
+            runner.note_connected()
             runner.last_tick = runner.clock()
             if runner.task is not None:
                 return
@@ -131,8 +151,13 @@ class Service:
         @client.event
         async def on_resumed():
             debouncer.reset()
+            runner.note_connected()
             runner.last_tick = runner.clock()
             runner.wake_if_mobile()
+
+        @client.event
+        async def on_disconnect():
+            runner.note_disconnected()
 
         @client.event
         async def on_session_create(session):
@@ -169,6 +194,12 @@ class Service:
             self.on_state("holding", "idle while your phone is awake")
         else:
             self.on_state("active", "back to %s" % status)
+
+    def _abandon(self, client, reason):
+        if client is not self.client:
+            return
+        self.on_state("connecting", reason)
+        asyncio.ensure_future(abandon_session(self.runner, client.close))
 
     def _stall(self, client):
         if client is not self.client or self.loop is None:

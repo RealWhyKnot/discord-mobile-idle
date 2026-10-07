@@ -23,6 +23,9 @@ class FakeClient:
         self.presence = []
         self.raises = None
         self.during_write = None
+        self.own = None
+        self.token_error = None
+        self.token_checks = 0
 
     def is_on_mobile(self):
         return self._on_mobile
@@ -37,6 +40,15 @@ class FakeClient:
     @property
     def saved_status(self):
         return self.saved
+
+    @property
+    def own_status(self):
+        return self.own
+
+    async def check_token(self):
+        self.token_checks += 1
+        if self.token_error is not None:
+            raise self.token_error
 
     def set_mobile(self, value):
         self._on_mobile = value
@@ -81,7 +93,15 @@ def make_controller(managed=(ONLINE,), restore=ONLINE, grace_seconds=0, clock=No
 
 
 def make_runner(
-    client, managed=(ONLINE,), restore=ONLINE, on_polls=1, off_polls=1, observe=False, clock=None, grace_seconds=0
+    client,
+    managed=(ONLINE,),
+    restore=ONLINE,
+    on_polls=1,
+    off_polls=1,
+    observe=False,
+    clock=None,
+    grace_seconds=0,
+    **options,
 ):
     clock = clock or FakeClock()
     return Runner(
@@ -91,7 +111,25 @@ def make_runner(
         poll_seconds=0,
         observe=observe,
         clock=clock,
+        **options,
     )
+
+
+class MemoryMarker:
+    def __init__(self, value=None):
+        self.value = value
+        self.writes = []
+
+    def read(self):
+        return self.value
+
+    def write(self, status):
+        self.value = status
+        self.writes.append(status)
+
+    def clear(self):
+        self.value = None
+        self.writes.append(None)
 
 
 async def drive(runner, ticks):
