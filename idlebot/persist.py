@@ -33,6 +33,9 @@ class StartLog:
     def save(self, history):
         write_atomic(self.path, "".join("%.0f\n" % t for t in history))
 
+    def forget(self, stamp):
+        self.save([t for t in self.load() if abs(t - stamp) >= 1])
+
 
 class HoldMarker:
     def __init__(self, path):

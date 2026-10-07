@@ -119,9 +119,16 @@ class Runner:
         status = self.client.saved_status
         if status == UNKNOWN:
             return
-        if status == self.controller.idle_status and (self.controller.holding or self.client.is_on_mobile()):
+        if status == self.controller.idle_status and self._idle_may_be_ours():
             return
         self.user_status = status
+
+    def _idle_may_be_ours(self):
+        if self.controller.holding:
+            return True
+        if self.marker is None:
+            return self.client.is_on_mobile()
+        return False
 
     def note_settings(self, status, previous=None):
         if status == previous:

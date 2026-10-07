@@ -90,7 +90,8 @@ def main(argv=None):
     starts = StartLog(os.path.join(STATE_DIR, "idlebot-starts"))
     now = time.time()
     delay, recent = start_delay(starts.load(), now)
-    starts.save(recent + [now + delay])
+    stamp = now + delay
+    starts.save(recent + [stamp])
 
     @client.event
     async def on_ready():
@@ -150,13 +151,16 @@ def main(argv=None):
         config.restore,
     )
     try:
-        return asyncio.run(serve(client, runner, config.token, delay))
+        code = asyncio.run(serve(client, runner, config.token, delay))
     except discord.LoginFailure:
         log.error("login failed: DISCORD_TOKEN was rejected")
         return 1
     except Exception:
         log.exception("the Discord session ended with an error")
         return 1
+    if code == 0:
+        starts.forget(stamp)
+    return code
 
 
 if __name__ == "__main__":

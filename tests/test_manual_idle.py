@@ -1,6 +1,6 @@
 import logging
 
-from helpers import DND, IDLE, INVISIBLE, ONLINE, FakeClient, drive, make_runner
+from helpers import DND, IDLE, INVISIBLE, ONLINE, FakeClient, MemoryMarker, drive, make_runner
 
 from idlebot.runner import check_afk
 
@@ -164,6 +164,34 @@ async def test_a_reconnect_while_we_hold_idle_does_not_read_it_as_yours():
 
     assert runner.user_status is None
     assert client.calls == [(IDLE, True), (ONLINE, True)]
+
+
+async def test_with_a_marker_and_no_hold_a_saved_idle_is_yours_even_with_the_phone_on():
+    client = FakeClient(status=IDLE, on_mobile=True, saved=IDLE)
+    runner = make_runner(client, marker=MemoryMarker())
+
+    runner.recover()
+    runner.seed_user_status()
+    await runner.tick()
+    client.set_mobile(False)
+    await drive(runner, 2)
+
+    assert runner.user_status == IDLE
+    assert client.calls == []
+
+
+async def test_with_a_marker_from_a_hold_a_saved_idle_is_ours():
+    client = FakeClient(status=IDLE, on_mobile=True, saved=IDLE)
+    runner = make_runner(client, marker=MemoryMarker(ONLINE))
+
+    runner.recover()
+    runner.seed_user_status()
+    await runner.tick()
+    client.set_mobile(False)
+    await runner.tick()
+
+    assert runner.user_status is None
+    assert client.calls == [(ONLINE, True)]
 
 
 async def test_a_saved_idle_at_login_with_the_phone_on_is_not_trusted():

@@ -43,6 +43,15 @@ def test_the_start_log_round_trips(tmp_path):
     assert log.load() == [10.0, 20.0]
 
 
+def test_a_clean_exit_takes_its_start_back_out(tmp_path):
+    log = StartLog(str(tmp_path / "starts"))
+    log.save([10.0, 20.0, 30.0])
+
+    log.forget(20.4)
+
+    assert log.load() == [10.0, 30.0]
+
+
 def test_a_missing_or_garbled_start_log_reads_empty(tmp_path):
     path = tmp_path / "starts"
     assert StartLog(str(path)).load() == []
