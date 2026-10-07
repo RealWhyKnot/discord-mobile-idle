@@ -10,10 +10,10 @@ and it picks up where it left off.
 
 ## Before you use this
 
-This drives a **user account** with a user token, not a bot account. Discord's Terms of Service
-prohibit automating user accounts. Use this at your own risk.
+This logs in as **you**, with your user token. Discord's Terms of Service prohibit automating user
+accounts. Use it at your own risk.
 
-Your token is equivalent to your password, keep it safe.
+Anyone who has your token can log in as you. Don't share it.
 
 ## Getting a token
 
@@ -23,10 +23,10 @@ and copy the `Authorization` request header. That value is the token.
 ## Windows
 
 Grab the zip from [Releases](https://github.com/RealWhyKnot/discord-mobile-idle/releases), unpack it
-anywhere, and run `discord-mobile-idle.exe`. It asks for your token once, then lives in the
-notification area with no window.
+anywhere, and run `discord-mobile-idle.exe`. It asks for your token once, then runs in the
+notification area without a window.
 
-The exe isn't code-signed, so SmartScreen may stop the first launch. Click More info, then Run
+The exe isn't code-signed and SmartScreen may stop the first launch. Click More info, then Run
 anyway.
 
 Right-click the tray icon for the menu:
@@ -52,8 +52,8 @@ docker run -d --name discord-mobile-idle --restart always \
     discord-mobile-idle
 ```
 
-Only run one instance, here or in the tray app. Two logins on the same token fight over your
-status.
+Run one copy only, either this or the tray app. If both are logged in with the same token they keep
+overwriting each other's status changes.
 
 `docker stop` restores your status before the container exits, the same as Quit does in the tray
 app, and so does Ctrl+C when you run it directly. `docker kill` skips it and leaves you on idle.
@@ -87,7 +87,7 @@ python -m idlebot --sessions    # dump the session list and exit
 python -m idlebot --observe     # log what it would do, write nothing
 ```
 
-`--observe` never writes your status, so it's what I use to check detection against a live account.
+`--observe` never writes your status. I use it to check detection against a live account.
 
 ## Building the exe yourself
 
@@ -100,8 +100,9 @@ pyinstaller --onefile --clean --noconfirm --noconsole ^
     --hidden-import audioop packaging/entry.py
 ```
 
-`discord-mobile-idle.exe --self-test` checks that the frozen build can reach everything it needs and
-exits 0. That is what the release workflow runs before publishing.
+`discord-mobile-idle.exe --self-test` imports discord.py-self, round-trips the token encryption and
+builds the tray icon. It exits 0 when all of that works, or 3 with the traceback in `self-test.log`.
+The release workflow runs it before publishing.
 
 ## Tests
 
@@ -121,8 +122,8 @@ python -m venv .venv
 That lints, runs the tests, checks the container entry point starts from the image bundle alone,
 builds the image if Docker is on PATH, and builds the executable and runs its self test. A
 `pre-push` hook in `.githooks` runs it for you once `git config core.hooksPath .githooks` is set.
-Drop a `verify.local.ps1` beside it and that runs too, which is where a machine-specific check
-belongs. `git push --no-verify` skips the lot.
+Machine-specific checks go in a `verify.local.ps1` beside it, which runs too. `git push --no-verify`
+skips the lot.
 
 ## Licence
 
