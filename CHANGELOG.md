@@ -11,6 +11,9 @@ starting at 0.
 ### Changed
 - **release:** Hash the zip with the shared checksums action (2026.9.18.0-2D46) (38ee728)
 
+### Fixed
+- Stop overriding a status you set to invisible or offline (2026.10.7.0-A2B3) (682edd5)
+
 ---
 
 ## [v2026.9.18.0](https://github.com/RealWhyKnot/discord-mobile-idle/releases/tag/v2026.9.18.0) - 2026-09-18
