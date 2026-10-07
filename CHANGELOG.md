@@ -8,7 +8,8 @@ starting at 0.
 
 ## Unreleased
 
-_No notable changes since the last release._
+### Changed
+- **deps-dev:** Bump the minor-and-patch group with 2 updates (#3) (2a43208)
 
 ---
 
