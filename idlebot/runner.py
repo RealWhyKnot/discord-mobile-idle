@@ -75,8 +75,11 @@ class Runner:
 
     def seed_user_status(self):
         status = self.client.saved_status
-        if status not in (UNKNOWN, self.controller.idle_status):
-            self.user_status = status
+        if status == UNKNOWN:
+            return
+        if status == self.controller.idle_status and (self.controller.holding or self.client.is_on_mobile()):
+            return
+        self.user_status = status
 
     def note_settings(self, status, previous=None):
         if status == previous:

@@ -138,7 +138,35 @@ async def test_an_unchanged_status_in_a_settings_update_is_ignored():
     assert runner.wake.is_set() is False
 
 
-async def test_a_saved_idle_at_login_is_not_trusted_as_yours():
+async def test_a_saved_idle_at_login_with_no_phone_is_yours():
+    client = FakeClient(status=IDLE, saved=IDLE)
+    runner = make_runner(client)
+
+    runner.seed_user_status()
+    client.set_mobile(True)
+    await drive(runner, 2)
+    client.set_mobile(False)
+    await drive(runner, 2)
+
+    assert runner.user_status == IDLE
+    assert client.calls == []
+
+
+async def test_a_reconnect_while_we_hold_idle_does_not_read_it_as_yours():
+    client = FakeClient(on_mobile=True)
+    runner = make_runner(client)
+    await runner.tick()
+    client.saved = IDLE
+    client.set_mobile(False)
+
+    runner.seed_user_status()
+    await runner.tick()
+
+    assert runner.user_status is None
+    assert client.calls == [(IDLE, True), (ONLINE, True)]
+
+
+async def test_a_saved_idle_at_login_with_the_phone_on_is_not_trusted():
     client = FakeClient(status=IDLE, on_mobile=True, saved=IDLE)
     runner = make_runner(client)
 
