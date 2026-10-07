@@ -78,7 +78,7 @@ async def test_our_own_write_is_not_read_as_your_choice():
     assert runner.controller.holding is True
 
 
-async def test_a_second_echo_of_the_same_status_is_your_choice():
+async def test_a_second_idle_echo_while_we_hold_it_is_not_your_choice():
     client = FakeClient(on_mobile=True)
     runner = make_runner(client)
     await runner.tick()
@@ -86,7 +86,8 @@ async def test_a_second_echo_of_the_same_status_is_your_choice():
     runner.note_settings(IDLE)
     runner.note_settings(IDLE)
 
-    assert runner.user_status == IDLE
+    assert runner.user_status is None
+    assert runner.controller.holding is True
 
 
 async def test_choosing_a_visible_status_again_resumes_management():

@@ -6,7 +6,7 @@ import discord
 
 from ..controller import IDLE, Debouncer, StatusController
 from ..discord_client import DiscordClient, start_watchdog
-from ..runner import Runner, Watchdog, check_cache_options, close_session
+from ..runner import Runner, Watchdog, check_afk, check_cache_options, close_session
 
 log = logging.getLogger("idlebot")
 
@@ -100,8 +100,10 @@ class Service:
             guild_subscriptions=False,
             member_cache_flags=discord.MemberCacheFlags.none(),
             sync_presence=False,
+            afk=True,
         )
         check_cache_options(client._connection)
+        check_afk(client._connection)
         debouncer = Debouncer(self.config.on_polls, self.config.off_polls)
         runner = Runner(
             NotifyingClient(client, self._wrote, self._hidden),
@@ -146,7 +148,7 @@ class Service:
 
         @client.event
         async def on_settings_update(before, after):
-            runner.note_settings(str(after.status))
+            runner.note_settings(str(after.status), str(before.status))
 
         try:
             await client.start(self.config.token)

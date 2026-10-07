@@ -34,6 +34,14 @@ def check_cache_options(state):
     return problems
 
 
+def check_afk(state):
+    if getattr(state, "_afk", False) is True:
+        log.info("session marked afk, so your phone still gets push notifications")
+        return True
+    log.warning("afk option not applied, your phone will get no push notifications while this runs")
+    return False
+
+
 def count_other_sessions(sessions):
     return sum(1 for s in sessions if not s.is_overall() and not s.is_current())
 
@@ -51,6 +59,7 @@ class Runner:
         self.hidden = False
         self.returning = False
         self.stood_down = False
+        self.following = False
         self.user_status = None
         self.setting_echo = None
         self.transitions = 0
@@ -66,18 +75,25 @@ class Runner:
 
     def seed_user_status(self):
         status = self.client.saved_status
-        if status != UNKNOWN:
+        if status not in (UNKNOWN, self.controller.idle_status):
             self.user_status = status
 
-    def note_settings(self, status):
+    def note_settings(self, status, previous=None):
+        if status == previous:
+            return
         if status == self.setting_echo:
             self.setting_echo = None
+            return
+        if status == self.controller.idle_status and self.controller.holding:
             return
         self.user_status = status
         self.wake.set()
 
     def wants_hidden(self):
         return self.user_status in HIDDEN_STATUSES
+
+    def wants_idle(self):
+        return self.user_status == self.controller.idle_status
 
     async def wait_for_wake(self):
         try:
@@ -111,6 +127,7 @@ class Runner:
         self.controller.stand_down()
         self.hidden = False
         self.returning = False
+        self.following = False
         if not self.observe:
             await self.client.hide()
         self.stood_down = True
@@ -122,6 +139,7 @@ class Runner:
         if not self.observe:
             await self.client.unhide(self.user_status)
         self.returning = True
+        self.following = self.wants_idle()
         log.info("you set %s, managing again", self.user_status)
 
     async def _hide(self):
@@ -143,6 +161,11 @@ class Runner:
     async def _manage(self):
         raw = self.client.is_on_mobile()
         stable = self.debouncer.update(raw)
+        if self.wants_idle():
+            await self._follow_idle(stable)
+            return
+        if self.following:
+            await self._stop_following()
         current = self.client.status if self.simulated is None else self.simulated
         if self.observe:
             log.info("observe: raw_mobile=%s stable=%s status=%s", raw, stable, current)
@@ -158,11 +181,30 @@ class Runner:
             self.simulated = self.pending
             self.pending = None
             return
-        await self.client.change_presence(status=self.pending, edit_settings=True)
         self.setting_echo = self.pending
+        await self.client.change_presence(status=self.pending, edit_settings=True)
         self.transitions += 1
         log.info("status %s -> %s (on_mobile=%s)", current, self.pending, stable)
         self.pending = None
+
+    async def _follow_idle(self, stable):
+        self.controller.step_aside(stable)
+        self.pending = None
+        if self.following:
+            return
+        if not self.observe:
+            await self.client.unhide(self.controller.idle_status)
+        self.following = True
+        log.info("you set idle, leaving it alone until you pick another status")
+
+    async def _stop_following(self):
+        target = self.user_status
+        if target == UNKNOWN:
+            target = self.controller.default_restore
+        if not self.observe:
+            await self.client.unhide(target)
+        self.following = False
+        log.info("you set %s, managing again", target)
 
     async def hand_back(self):
         if self.observe or not self.controller.holding:
@@ -170,8 +212,8 @@ class Runner:
         target = self.controller.saved or self.controller.default_restore
         if self.client.status not in (self.controller.idle_status, target):
             return
-        await self.client.change_presence(status=target, edit_settings=True)
         self.setting_echo = target
+        await self.client.change_presence(status=target, edit_settings=True)
         log.info("restored %s on shutdown", target)
 
     async def run(self):
@@ -190,13 +232,14 @@ class Runner:
             return
         self.last_liveness = now
         log.info(
-            "alive uptime=%.0fs transitions=%d on_mobile=%s holding=%s hidden=%s returning=%s you=%s",
+            "alive uptime=%.0fs transitions=%d on_mobile=%s holding=%s hidden=%s returning=%s following=%s you=%s",
             now - self.started,
             self.transitions,
             self.debouncer.stable,
             self.controller.holding,
             self.hidden,
             self.returning,
+            self.following,
             self.user_status,
         )
 

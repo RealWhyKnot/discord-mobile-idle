@@ -9,7 +9,7 @@ import discord
 from .config import ConfigError, load_config
 from .controller import Debouncer, StatusController
 from .discord_client import DiscordClient, start_watchdog
-from .runner import Runner, Watchdog, check_cache_options, serve
+from .runner import Runner, Watchdog, check_afk, check_cache_options, serve
 
 log = logging.getLogger("idlebot")
 
@@ -33,7 +33,7 @@ def log_sessions(client):
                 label = "this bot"
             else:
                 label = str(session.client)
-            log.info("session %s status=%s", label, session.status)
+            log.info("session %s status=%s active=%s", label, session.status, session.active)
     except Exception:
         log.exception("could not read sessions")
 
@@ -65,8 +65,10 @@ def main(argv=None):
         guild_subscriptions=False,
         member_cache_flags=discord.MemberCacheFlags.none(),
         sync_presence=False,
+        afk=True,
     )
     check_cache_options(client._connection)
+    check_afk(client._connection)
     controller = StatusController(config.restore, config.managed)
     debouncer = Debouncer(config.on_polls, config.off_polls)
     runner = Runner(
@@ -117,7 +119,7 @@ def main(argv=None):
 
     @client.event
     async def on_settings_update(before, after):
-        runner.note_settings(str(after.status))
+        runner.note_settings(str(after.status), str(before.status))
 
     log.info(
         "starting observe=%s poll=%ds managed=%s restore=%s",

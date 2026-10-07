@@ -6,7 +6,11 @@ Shows you as idle on Discord while you're on your phone.
 
 It also goes offline for you when no other client is connected, and it leaves your status alone
 entirely while you've set yourself invisible or offline, on any device. Pick a visible status again
-and it picks up where it left off.
+and it picks up where it left off. If you set yourself idle, it won't switch you back to online when
+you put the phone down.
+
+Its own login is flagged as AFK. Discord holds back phone notifications while any login looks
+active, and this one never does.
 
 ## Before you use this
 

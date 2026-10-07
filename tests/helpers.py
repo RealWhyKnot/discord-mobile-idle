@@ -22,6 +22,7 @@ class FakeClient:
         self.calls = []
         self.presence = []
         self.raises = None
+        self.during_write = None
 
     def is_on_mobile(self):
         return self._on_mobile
@@ -45,6 +46,8 @@ class FakeClient:
 
     async def change_presence(self, *, status, edit_settings=True):
         self.calls.append((status, edit_settings))
+        if self.during_write is not None:
+            self.during_write(status)
         if self.raises is not None:
             raise self.raises
         self._status = status

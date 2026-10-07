@@ -59,8 +59,11 @@ class StatusController:
         self.grace_until = 0.0
 
     def stand_down(self):
+        self.step_aside(False)
+
+    def step_aside(self, is_on_mobile):
         self.release()
-        self.on_mobile = False
+        self.on_mobile = is_on_mobile
 
 
 class Debouncer:
