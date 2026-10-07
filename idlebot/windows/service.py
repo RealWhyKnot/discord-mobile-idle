@@ -6,7 +6,8 @@ import time
 import discord
 
 from ..controller import IDLE, Debouncer, StatusController
-from ..discord_client import DiscordClient, start_watchdog
+from ..discord_client import DiscordClient, quiet_curl, start_watchdog
+from ..lean import SlimParsers
 from ..persist import HoldMarker, start_delay
 from ..runner import Runner, Watchdog, abandon_session, check_afk, check_cache_options, close_session
 from . import store
@@ -119,6 +120,8 @@ class Service:
         )
         check_cache_options(client._connection)
         check_afk(client._connection)
+        quiet_curl()
+        parsers = client._connection.parsers = SlimParsers(client._connection.parsers)
         debouncer = Debouncer(self.config.on_polls, self.config.off_polls)
         runner = Runner(
             NotifyingClient(client, self._wrote, self._hidden),
@@ -126,6 +129,7 @@ class Service:
             debouncer,
             self.config.poll_seconds,
             marker=HoldMarker(store.path_for("hold")),
+            stats=parsers.summary,
         )
         runner.on_fatal = lambda reason: self._abandon(client, reason)
         self.client = client

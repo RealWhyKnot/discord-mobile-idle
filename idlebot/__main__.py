@@ -10,7 +10,8 @@ import discord
 
 from .config import ConfigError, load_config
 from .controller import Debouncer, StatusController
-from .discord_client import DiscordClient, start_watchdog
+from .discord_client import DiscordClient, quiet_curl, start_watchdog
+from .lean import SlimParsers
 from .persist import HoldMarker, StartLog, start_delay
 from .runner import Runner, Watchdog, check_afk, check_cache_options, serve
 
@@ -73,6 +74,8 @@ def main(argv=None):
     )
     check_cache_options(client._connection)
     check_afk(client._connection)
+    quiet_curl()
+    parsers = client._connection.parsers = SlimParsers(client._connection.parsers)
     controller = StatusController(config.restore, config.managed)
     debouncer = Debouncer(config.on_polls, config.off_polls)
     runner = Runner(
@@ -82,6 +85,7 @@ def main(argv=None):
         config.poll_seconds,
         observe=args.observe or args.sessions,
         marker=HoldMarker(os.path.join(STATE_DIR, "idlebot-hold")),
+        stats=parsers.summary,
     )
     starts = StartLog(os.path.join(STATE_DIR, "idlebot-starts"))
     now = time.time()

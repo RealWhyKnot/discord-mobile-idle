@@ -65,6 +65,7 @@ class Runner:
         marker=None,
         write_timeout=WRITE_TIMEOUT,
         echo_seconds=ECHO_SECONDS,
+        stats=None,
     ):
         self.client = client
         self.controller = controller
@@ -75,6 +76,7 @@ class Runner:
         self.marker = marker
         self.write_timeout = write_timeout
         self.echo_seconds = echo_seconds
+        self.stats = stats
         self.pending = None
         self.simulated = None
         self.hidden = False
@@ -368,6 +370,8 @@ class Runner:
             self.following,
             self.user_status,
         )
+        if self.stats is not None:
+            log.info("ignored gateway events: %s", self.stats())
         if self.observe or not self.connected:
             return
         try:

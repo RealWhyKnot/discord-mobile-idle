@@ -2,7 +2,9 @@ import threading
 import time
 
 import discord
+from curl_cffi import aio
 
+from .lean import slow_curl_safety_tick
 from .runner import count_other_sessions
 
 
@@ -41,6 +43,10 @@ class DiscordClient:
 
     async def unhide(self, status):
         await self._client.change_presence(status=discord.Status(status), edit_settings=False)
+
+
+def quiet_curl():
+    return slow_curl_safety_tick(aio.AsyncCurl, aio.CURL_SOCKET_TIMEOUT, aio.CURL_POLL_NONE)
 
 
 def start_watchdog(watchdog, interval):
