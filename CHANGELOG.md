@@ -8,6 +8,12 @@ starting at 0.
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.10.7.0](https://github.com/RealWhyKnot/discord-mobile-idle/releases/tag/v2026.10.7.0) - 2026-10-07
+
 ### Changed
 - **release:** Hash the zip with the shared checksums action (2026.9.18.0-2D46) (38ee728)
 
