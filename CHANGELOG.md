@@ -8,6 +8,12 @@ starting at 0.
 
 ## Unreleased
 
+_No notable changes since the last release._
+
+---
+
+## [v2026.10.8.0](https://github.com/RealWhyKnot/discord-mobile-idle/releases/tag/v2026.10.8.0) - 2026-10-08
+
 ### Changed
 - **deps-dev:** Bump the minor-and-patch group with 2 updates (#3) (2a43208)
 - Skip unused gateway data and slow curl_cffi's idle timer (2026.10.8.0-7ABB) (e4a8fbc)
