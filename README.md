@@ -53,6 +53,7 @@ Docker builds it straight from this repo, no clone needed:
 docker build -t discord-mobile-idle https://github.com/RealWhyKnot/discord-mobile-idle.git
 docker run -d --name discord-mobile-idle --restart always \
     -e DISCORD_TOKEN=your_token_here \
+    -e STATE_DIR=/state -v discord-mobile-idle:/state \
     discord-mobile-idle
 ```
 
@@ -60,7 +61,8 @@ Run one copy only, either this or the tray app. If both are logged in with the s
 overwriting each other's status changes.
 
 `docker stop` restores your status before the container exits, the same as Quit does in the tray
-app, and so does Ctrl+C when you run it directly. `docker kill` skips it and leaves you on idle.
+app, and so does Ctrl+C when you run it directly. `docker kill` skips it and leaves you on idle
+until the next start, which finishes the restore if it can read the same state folder.
 
 Without Docker you need Python 3.10 or newer. Clone the repo, `pip install -r requirements.txt`,
 then `DISCORD_TOKEN=... python -m idlebot`.
@@ -68,7 +70,7 @@ then `DISCORD_TOKEN=... python -m idlebot`.
 ## Configuration
 
 The container reads these from the environment. The Windows app reads the same names from
-`settings.json`, except `DISCORD_TOKEN` and `READY_FILE`, which are container-only.
+`settings.json`, except `DISCORD_TOKEN`, `READY_FILE` and `STATE_DIR`, which are container-only.
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
@@ -83,6 +85,7 @@ The container reads these from the environment. The Windows app reads the same n
 | `UPDATE_CHANNEL` | `release` | Windows only. `release` or `beta`. |
 | `SKIPPED_TAG` | empty | Windows only. A release tag to stop offering. |
 | `READY_FILE` | `/tmp/ready` | Written once after login. Useful as a healthcheck. |
+| `STATE_DIR` | system temp folder | Where it keeps an interrupted idle and its recent restarts. Mount a volume here to keep both when the container is replaced. |
 
 ## Debugging
 
