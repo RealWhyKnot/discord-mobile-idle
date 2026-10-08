@@ -10,6 +10,14 @@ starting at 0.
 
 ### Changed
 - **deps-dev:** Bump the minor-and-patch group with 2 updates (#3) (2a43208)
+- Skip unused gateway data and slow curl_cffi's idle timer (2026.10.8.0-7ABB) (e4a8fbc)
+- **deps:** Pin every runtime dependency to the versions in the live image (2026.10.8.0-7ABB) (0b91026)
+
+### Fixed
+- Read a login-time idle as yours unless the hold marker says it is ours (2026.10.8.0-7ABB) (94350d5)
+- Recover from dropped writes, dead tokens, crash loops and interrupted holds (2026.10.8.0-7ABB) (7477e2e)
+- Trust an idle found at login unless the phone is on or we hold it (2026.10.8.0-7ABB) (21a2293)
+- Keep a status you set to idle and mark the session afk (2026.10.8.0-7ABB) (5f9b59d)
 
 ---
 
