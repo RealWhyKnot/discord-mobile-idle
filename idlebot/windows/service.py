@@ -6,10 +6,9 @@ import time
 import discord
 
 from ..controller import IDLE, Debouncer, StatusController
-from ..discord_client import DiscordClient, quiet_curl, start_watchdog
-from ..lean import SlimParsers
+from ..discord_client import DiscordClient, make_client, start_watchdog
 from ..persist import HoldMarker, start_delay
-from ..runner import Runner, Watchdog, abandon_session, check_afk, check_cache_options, close_session
+from ..runner import Runner, Watchdog, abandon_session, close_session
 from . import store
 
 log = logging.getLogger("idlebot")
@@ -110,18 +109,7 @@ class Service:
                 delay = BACKOFF_START
 
     async def _session(self):
-        client = discord.Client(
-            chunk_guilds_at_startup=False,
-            max_messages=None,
-            guild_subscriptions=False,
-            member_cache_flags=discord.MemberCacheFlags.none(),
-            sync_presence=False,
-            afk=True,
-        )
-        check_cache_options(client._connection)
-        check_afk(client._connection)
-        quiet_curl()
-        parsers = client._connection.parsers = SlimParsers(client._connection.parsers)
+        client, parsers = make_client()
         debouncer = Debouncer(self.config.on_polls, self.config.off_polls)
         runner = Runner(
             NotifyingClient(client, self._wrote, self._hidden),

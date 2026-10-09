@@ -4,8 +4,8 @@ import time
 import discord
 from curl_cffi import aio
 
-from .lean import slow_curl_safety_tick
-from .runner import count_other_sessions
+from .lean import SlimParsers, slow_curl_safety_tick
+from .runner import check_afk, check_cache_options, count_other_sessions
 
 
 class DiscordClient:
@@ -47,6 +47,22 @@ class DiscordClient:
 
 def quiet_curl():
     return slow_curl_safety_tick(aio.AsyncCurl, aio.CURL_SOCKET_TIMEOUT, aio.CURL_POLL_NONE)
+
+
+def make_client():
+    client = discord.Client(
+        chunk_guilds_at_startup=False,
+        max_messages=None,
+        guild_subscriptions=False,
+        member_cache_flags=discord.MemberCacheFlags.none(),
+        sync_presence=False,
+        afk=True,
+    )
+    check_cache_options(client._connection)
+    check_afk(client._connection)
+    quiet_curl()
+    parsers = client._connection.parsers = SlimParsers(client._connection.parsers)
+    return client, parsers
 
 
 def start_watchdog(watchdog, interval):

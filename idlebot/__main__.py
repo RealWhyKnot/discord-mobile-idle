@@ -10,10 +10,9 @@ import discord
 
 from .config import ConfigError, load_config
 from .controller import Debouncer, StatusController
-from .discord_client import DiscordClient, quiet_curl, start_watchdog
-from .lean import SlimParsers
+from .discord_client import DiscordClient, make_client, start_watchdog
 from .persist import HoldMarker, StartLog, start_delay
-from .runner import Runner, Watchdog, check_afk, check_cache_options, serve
+from .runner import Runner, Watchdog, serve
 
 log = logging.getLogger("idlebot")
 
@@ -64,18 +63,7 @@ def main(argv=None):
         log.error("configuration error: %s", exc)
         return 2
 
-    client = discord.Client(
-        chunk_guilds_at_startup=False,
-        max_messages=None,
-        guild_subscriptions=False,
-        member_cache_flags=discord.MemberCacheFlags.none(),
-        sync_presence=False,
-        afk=True,
-    )
-    check_cache_options(client._connection)
-    check_afk(client._connection)
-    quiet_curl()
-    parsers = client._connection.parsers = SlimParsers(client._connection.parsers)
+    client, parsers = make_client()
     controller = StatusController(config.restore, config.managed)
     debouncer = Debouncer(config.on_polls, config.off_polls)
     runner = Runner(
