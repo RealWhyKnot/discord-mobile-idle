@@ -120,6 +120,10 @@ python -m venv .venv
 .venv/bin/python -m pytest
 ```
 
+The memory and CPU budgets in `tests/test_resources.py` measure the real library, so they also need
+`requirements.txt`. They skip without it. To check the container image, run `tests/resource_probe.py`
+inside it and point `RESOURCE_REPORT` at the JSON it prints.
+
 ## Before pushing
 
 ```

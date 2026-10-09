@@ -55,3 +55,28 @@ jobs:
 
       - name: Tests
         run: python -m pytest
+
+  resources:
+    name: resource budgets
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install runtime and test dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Resource budgets against the real library
+        env:
+          REQUIRE_RESOURCE_PROBE: "1"
+        run: python -m pytest --no-cov -rs tests/test_resources.py tests/test_perf.py
