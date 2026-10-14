@@ -1,28 +1,16 @@
-FROM python:3.13-alpine AS build
+FROM rust:1-alpine AS build
 
-RUN apk add --no-cache binutils
+RUN apk add --no-cache musl-dev cmake make perl clang-dev g++ linux-headers git
 
-COPY requirements.txt /tmp/requirements.txt
-RUN python -m venv /venv \
-    && /venv/bin/pip install --no-cache-dir --no-compile --disable-pip-version-check \
-        --only-binary=aiohttp,multidict,yarl,frozenlist,propcache,curl_cffi,cffi,audioop-lts \
-        -r /tmp/requirements.txt \
-    && /venv/bin/python -OO -m compileall -q /venv/lib \
-    && find /venv -type f -name '*.so*' -exec strip --strip-unneeded {} + \
-    && rm -rf /venv/lib/python3.13/site-packages/pip \
-        /venv/lib/python3.13/site-packages/pip-*.dist-info \
-        /venv/bin/pip /venv/bin/pip3 /venv/bin/pip3.13
+WORKDIR /src
+COPY Cargo.toml Cargo.lock ./
+COPY src/ ./src/
+ENV RUSTFLAGS="-C target-feature=-crt-static"
+RUN cargo rustc --release --locked --bin idlebot -- -C target-feature=+crt-static \
+    && cp target/release/idlebot /idlebot
 
-FROM python:3.13-alpine
+FROM busybox:musl
 
-ENV PATH=/venv/bin:$PATH \
-    PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONOPTIMIZE=2
+COPY --from=build /idlebot /usr/local/bin/idlebot
 
-COPY --from=build /venv /venv
-
-WORKDIR /app
-COPY idlebot/ /app/idlebot/
-
-ENTRYPOINT ["python", "-m", "idlebot"]
+ENTRYPOINT ["idlebot"]

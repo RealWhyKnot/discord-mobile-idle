@@ -80,3 +80,47 @@ jobs:
         env:
           REQUIRE_RESOURCE_PROBE: "1"
         run: python -m pytest --no-cov -rs tests/test_resources.py tests/test_perf.py
+
+  rust:
+    name: rust fmt + clippy + tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component rustfmt,clippy
+          rustup default stable
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+  image:
+    name: container image
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Build
+        run: docker build -t discord-mobile-idle:ci .
+
+      - name: Rejects an empty token
+        shell: bash
+        run: |
+          set +e
+          docker run --rm -e DISCORD_TOKEN= discord-mobile-idle:ci
+          code=$?
+          if [ "$code" != "2" ]; then
+            echo "container exited $code, expected 2" >&2
+            exit 1
+          fi

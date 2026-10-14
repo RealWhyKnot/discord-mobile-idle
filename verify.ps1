@@ -35,30 +35,23 @@ Start-Step 'Tests'
 & $python -m pytest
 Assert-ExitCode 'pytest'
 
-Start-Step 'Container bundle'
-$stage = Join-Path ([System.IO.Path]::GetTempPath()) ('idlebot-bundle-' + [System.Guid]::NewGuid().ToString('N'))
-New-Item -ItemType Directory -Force $stage | Out-Null
-try {
-    Copy-Item 'idlebot' (Join-Path $stage 'idlebot') -Recurse
-    Copy-Item 'requirements.txt' $stage
-    Get-ChildItem $stage -Recurse -Directory -Include '__pycache__', 'windows' |
-        Remove-Item -Recurse -Force
-    $saved = $env:DISCORD_TOKEN
-    $env:DISCORD_TOKEN = ''
-    try {
-        Push-Location $stage
-        $output = & $python -m idlebot 2>&1
-        Pop-Location
-        Assert-ExitCode 'container entry point' 2
-    } finally {
-        $env:DISCORD_TOKEN = $saved
+Start-Step 'Container code'
+$cargo = Get-Command cargo -ErrorAction SilentlyContinue
+if (-not $cargo) {
+    Write-Host 'cargo is not on PATH, skipping the Rust checks'
+    $failures += 'Rust checks not run (no cargo)'
+} else {
+    cargo fmt --check
+    Assert-ExitCode 'cargo fmt'
+    if ($env:OS -eq 'Windows_NT') {
+        Write-Host 'the TLS library needs NASM to build on Windows, leaving clippy and the tests to verify.local.ps1 and CI'
+    } else {
+        cargo clippy --locked --all-targets --quiet -- -D warnings
+        Assert-ExitCode 'cargo clippy'
+        cargo test --locked --quiet
+        Assert-ExitCode 'cargo test'
+        Write-Host 'Rust code is formatted, lint clean and passes its tests'
     }
-    if ($output -notmatch 'DISCORD_TOKEN is required') {
-        throw "container entry point did not report a missing token: $output"
-    }
-    Write-Host 'container entry point starts from the image bundle alone'
-} finally {
-    Remove-Item $stage -Recurse -Force -ErrorAction SilentlyContinue
 }
 
 Start-Step 'Container image'

@@ -64,8 +64,10 @@ overwriting each other's status changes.
 app, and so does Ctrl+C when you run it directly. `docker kill` skips it and leaves you on idle
 until the next start, which finishes the restore if it can read the same state folder.
 
-Without Docker you need Python 3.10 or newer. Clone the repo, `pip install -r requirements.txt`,
-then `DISCORD_TOKEN=... python -m idlebot`.
+The image is a single static Rust binary on busybox, about 10 MB on disk. It uses about 7 MB of
+memory once logged in. To run it without Docker, build it with `cargo build --release`
+(the TLS library needs CMake, Clang and a C++ compiler) and start it with
+`DISCORD_TOKEN=... ./target/release/idlebot`.
 
 ## Configuration
 
@@ -90,10 +92,11 @@ The container reads these from the environment. The Windows app reads the same n
 ## Debugging
 
 ```
-python -m idlebot --sessions    # dump the session list and exit
-python -m idlebot --observe     # log what it would do, write nothing
+idlebot --sessions    # dump the session list and exit
+idlebot --observe     # log what it would do, write nothing
 ```
 
+The Python package behind the tray app takes the same flags through `python -m idlebot`.
 `--observe` never writes your status. I use it to check detection against a live account.
 
 ## Building the exe yourself
@@ -120,9 +123,16 @@ python -m venv .venv
 .venv/bin/python -m pytest
 ```
 
-The memory and CPU budgets in `tests/test_resources.py` measure the real library, so they also need
-`requirements.txt`. They skip without it. To check the container image, run `tests/resource_probe.py`
-inside it and point `RESOURCE_REPORT` at the JSON it prints.
+The memory and CPU budgets in `tests/test_resources.py` measure the library the tray app uses, so
+they also need `requirements.txt`. They skip without it.
+
+The container build has its own tests:
+
+```
+cargo fmt --check
+cargo clippy --all-targets -- -D warnings
+cargo test
+```
 
 ## Before pushing
 
@@ -130,8 +140,9 @@ inside it and point `RESOURCE_REPORT` at the JSON it prints.
 .\verify.ps1
 ```
 
-That lints, runs the tests, checks the container entry point starts from the image bundle alone,
-builds the image if Docker is on PATH, and builds the executable and runs its self test. A
+That lints and tests both the Python and Rust code, builds the image if Docker is on PATH, and
+builds the executable and runs its self test. On Windows the Rust side only gets `cargo fmt`,
+because the TLS library needs NASM to build there. A
 `pre-push` hook in `.githooks` runs it for you once `git config core.hooksPath .githooks` is set.
 Machine-specific checks go in a `verify.local.ps1` beside it, which runs too. `git push --no-verify`
 skips the lot.
