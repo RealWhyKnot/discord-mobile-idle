@@ -28,7 +28,7 @@ permissions:
 
 jobs:
   quality:
-    name: lint + tests
+    name: repo scripts
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -56,31 +56,6 @@ jobs:
       - name: Tests
         run: python -m pytest
 
-  resources:
-    name: resource budgets
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v7
-
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: "3.13"
-
-      - name: Install runtime and test dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-          python -m pip install --upgrade pip
-          python -m pip install -r requirements.txt -r requirements-dev.txt
-
-      - name: Resource budgets against the real library
-        env:
-          REQUIRE_RESOURCE_PROBE: "1"
-        run: python -m pytest --no-cov -rs tests/test_resources.py tests/test_perf.py
-
   rust:
     name: rust fmt + clippy + tests
     runs-on: ubuntu-latest
@@ -102,6 +77,42 @@ jobs:
 
       - name: Tests
         run: cargo test --locked
+
+  windows:
+    name: windows tray app
+    runs-on: windows-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Toolchain
+        run: |
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - name: NASM
+        uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b
+        with:
+          version: 2.16.03
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+      - name: Build the tray app
+        run: cargo build --release --locked --bin discord-mobile-idle
+
+      - name: Self test
+        shell: pwsh
+        run: |
+          $run = Start-Process -FilePath target/release/discord-mobile-idle.exe -ArgumentList '--self-test' -Wait -PassThru
+          if ($run.ExitCode -ne 0) {
+            Get-Content "$env:LOCALAPPDATA/discord-mobile-idle/self-test.log" -ErrorAction SilentlyContinue
+            throw "self test exited with $($run.ExitCode)."
+          }
 
   image:
     name: container image

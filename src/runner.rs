@@ -99,6 +99,14 @@ pub trait Session {
     fn on_ready(&mut self, first: bool) -> bool;
 }
 
+pub enum Change<'a> {
+    Wrote(&'a str),
+    Shown(&'a str),
+    Hidden { by_choice: bool },
+}
+
+pub type OnChange = Box<dyn Fn(Change)>;
+
 pub struct Runner<C: Client, M: Marker> {
     pub client: C,
     pub controller: StatusController,
@@ -110,6 +118,7 @@ pub struct Runner<C: Client, M: Marker> {
     pub write_timeout: f64,
     pub echo_seconds: f64,
     pub stats: Option<Box<dyn Fn() -> String>>,
+    pub on_change: Option<OnChange>,
     pub beat: Arc<AtomicU64>,
     pub pending: Option<String>,
     pub simulated: Option<String>,
@@ -155,6 +164,7 @@ impl<C: Client, M: Marker> Runner<C, M> {
             write_timeout: WRITE_TIMEOUT,
             echo_seconds: ECHO_SECONDS,
             stats: None,
+            on_change: None,
             beat: Arc::new(AtomicU64::new(now.to_bits())),
             pending: None,
             simulated: None,
@@ -391,17 +401,29 @@ impl<C: Client, M: Marker> Runner<C, M> {
         self.setting_echo = Some(status.to_string());
         self.client.change_presence(status).await?;
         self.sent(status);
+        self.changed(Change::Wrote(status));
         Ok(())
     }
 
     async fn show(&mut self, status: &str) -> Result<(), Error> {
         if status == INVISIBLE {
             self.client.hide().await?;
+            self.sent(status);
+            self.changed(Change::Hidden {
+                by_choice: self.wants_hidden(),
+            });
         } else {
             self.client.unhide(status).await?;
+            self.sent(status);
+            self.changed(Change::Shown(status));
         }
-        self.sent(status);
         Ok(())
+    }
+
+    fn changed(&self, change: Change) {
+        if let Some(on_change) = &self.on_change {
+            on_change(change);
+        }
     }
 
     fn sent(&mut self, status: &str) {
@@ -724,6 +746,7 @@ pub async fn serve<C: Client, M: Marker, S: Session>(
 pub struct Watchdog {
     pub last_tick: Box<dyn Fn() -> f64 + Send>,
     pub timeout: f64,
+    pub action: &'static str,
     pub on_stall: Box<dyn FnMut() + Send>,
     pub clock: Box<dyn Fn() -> f64 + Send>,
     pub fired: bool,
@@ -739,7 +762,7 @@ impl Watchdog {
             return false;
         }
         self.fired = true;
-        error!("watchdog: no tick for {:.0}s, exiting", stalled);
+        error!("watchdog: no tick for {:.0}s, {}", stalled, self.action);
         (self.on_stall)();
         true
     }
@@ -763,7 +786,7 @@ pub fn beat_reader(beat: Arc<AtomicU64>) -> impl Fn() -> f64 + Send {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::controller::tests::{make_controller, FakeClock};
     use crate::controller::{DND, IDLE, ONLINE};
@@ -2587,6 +2610,7 @@ pub mod tests {
         let watchdog = Watchdog {
             last_tick: Box::new(beat_reader(last.clone())),
             timeout,
+            action: "exiting",
             on_stall: Box::new(move || {
                 count.fetch_add(1, Ordering::SeqCst);
             }),

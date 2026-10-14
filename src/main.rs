@@ -1,23 +1,15 @@
-mod config;
-mod controller;
-mod discord;
-mod log;
-mod persist;
-mod proto;
-mod runner;
-mod state;
-
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::config::{load_config, py_list};
-use crate::controller::{monotonic, Debouncer, StatusController};
-use crate::discord::{DiscordClient, Gateway, GatewaySession, Http};
-use crate::persist::{start_delay, HoldMarker, StartLog};
-use crate::runner::{serve, Runner};
+use idlebot::config::{load_config, py_list};
+use idlebot::controller::{monotonic, Debouncer, StatusController};
+use idlebot::discord::{self, DiscordClient, Gateway, GatewaySession, Http};
+use idlebot::persist::{start_delay, HoldMarker, StartLog};
+use idlebot::runner::{serve, Runner};
+use idlebot::{error, info};
 
 const GRACE_SECONDS: f64 = 25.0;
 const USAGE: &str = "usage: idlebot [-h] [--observe] [--sessions]";
@@ -78,7 +70,7 @@ async fn stop_signal() {
             }
         }
         _ => {
-            warning!("could not install signal handlers");
+            idlebot::warning!("could not install signal handlers");
             std::future::pending::<()>().await
         }
     }
@@ -139,7 +131,7 @@ fn run() -> i32 {
         commands: commands_tx,
         link,
         sessions_only: args.sessions,
-        ready_file,
+        ready_file: Some(ready_file),
         watchdog: Some((runner.beat.clone(), config.watchdog_seconds)),
     };
 

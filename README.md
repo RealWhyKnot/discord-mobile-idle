@@ -40,7 +40,7 @@ Right-click the tray icon for the menu:
 | Open log | Opens `idlebot.log`. Double-clicking the icon does the same. |
 | Edit settings | Opens `settings.json` in your editor. Restart afterwards. |
 | Set token | Replaces the stored token and reconnects. |
-| Start with Windows | Adds or removes the logon entry. Only offered for the packaged exe. |
+| Start with Windows | Adds or removes the logon entry. |
 | Reconnect | Drops the gateway connection and builds a new one. |
 | Check for updates | Looks for a newer release. Once one is downloaded and checked, this becomes Install and restart. |
 | Quit | Restores your status first, then exits. |
@@ -96,42 +96,40 @@ idlebot --sessions    # dump the session list and exit
 idlebot --observe     # log what it would do, write nothing
 ```
 
-The Python package behind the tray app takes the same flags through `python -m idlebot`.
-`--observe` never writes your status. I use it to check detection against a live account.
+Only the container binary takes these flags. `--observe` never writes your status. I use it to check
+detection against a live account.
 
 ## Building the exe yourself
 
+The tray app is the `discord-mobile-idle` binary, built from the same crate as the container. On
+Windows the TLS library needs NASM on PATH as well as CMake, Clang and the MSVC build tools.
+
 ```
-pip install -r requirements-win.txt pyinstaller
-pyinstaller --onefile --clean --noconfirm --noconsole ^
-    --name discord-mobile-idle --distpath dist/exe --paths . --icon packaging/icon.ico ^
-    --collect-all curl_cffi --collect-all discord_protos ^
-    --collect-submodules discord --collect-submodules pystray ^
-    --hidden-import audioop packaging/entry.py
+cargo build --release --bin discord-mobile-idle
 ```
 
-`discord-mobile-idle.exe --self-test` imports discord.py-self, round-trips the token encryption and
-builds the tray icon. It exits 0 when all of that works, or 3 with the traceback in `self-test.log`.
-The release workflow runs it before publishing.
+Set `IDLEBOT_VERSION` while building to stamp a version. Without it the exe calls itself
+`0.0.0.0-dev` and never looks for updates.
+
+`discord-mobile-idle.exe --self-test` round-trips the token encryption, loads the tray icons,
+creates the tray window and sets up both HTTP clients. It exits 0 when all of that works, or 3 with
+the error in `self-test.log`. The release workflow runs it before publishing.
 
 ## Tests
-
-```
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements-dev.txt    # .venv/Scripts on Windows
-.venv/bin/python -m ruff check .
-.venv/bin/python -m pytest
-```
-
-The memory and CPU budgets in `tests/test_resources.py` measure the library the tray app uses, so
-they also need `requirements.txt`. They skip without it.
-
-The container build has its own tests:
 
 ```
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
+```
+
+The tray, the token store and the updater only build on Windows, so their tests only run there.
+The changelog script has a few Python tests of its own:
+
+```
+python -m pip install -r requirements-dev.txt
+python -m ruff check .
+python -m pytest
 ```
 
 ## Before pushing
@@ -140,12 +138,11 @@ cargo test
 .\verify.ps1
 ```
 
-That lints and tests both the Python and Rust code, builds the image if Docker is on PATH, and
-builds the executable and runs its self test. On Windows the Rust side only gets `cargo fmt`,
-because the TLS library needs NASM to build there. A
-`pre-push` hook in `.githooks` runs it for you once `git config core.hooksPath .githooks` is set.
-Machine-specific checks go in a `verify.local.ps1` beside it, which runs too. `git push --no-verify`
-skips the lot.
+That runs the Rust checks and the changelog tests, builds the image if Docker is on PATH, then builds
+the exe and runs its self test. It looks for NASM on PATH first, then under
+`%LOCALAPPDATA%\Programs\nasm`. A `pre-push` hook in `.githooks` runs it for you once
+`git config core.hooksPath .githooks` is set. Machine-specific checks go in a `verify.local.ps1`
+beside it, which runs too. `git push --no-verify` skips the lot.
 
 ## Licence
 

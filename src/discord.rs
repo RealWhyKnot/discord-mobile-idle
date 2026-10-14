@@ -1219,7 +1219,7 @@ pub struct GatewaySession {
     pub commands: UnboundedSender<Command>,
     pub link: Link,
     pub sessions_only: bool,
-    pub ready_file: PathBuf,
+    pub ready_file: Option<PathBuf>,
     pub watchdog: Option<(Arc<AtomicU64>, u64)>,
 }
 
@@ -1242,7 +1242,9 @@ impl runner::Session for GatewaySession {
                 info!("{}", line);
             }
         }
-        write_atomic(&self.ready_file, "ok");
+        if let Some(ready_file) = &self.ready_file {
+            write_atomic(ready_file, "ok");
+        }
         if self.sessions_only {
             return true;
         }
@@ -1251,6 +1253,7 @@ impl runner::Session for GatewaySession {
                 Watchdog {
                     last_tick: Box::new(beat_reader(beat)),
                     timeout: seconds as f64,
+                    action: "exiting",
                     on_stall: Box::new(|| std::process::exit(1)),
                     clock: Box::new(crate::controller::seconds),
                     fired: false,

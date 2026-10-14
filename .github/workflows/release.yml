@@ -23,7 +23,7 @@ jobs:
   release:
     name: Build and publish release
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 45
 
     steps:
       - name: Checkout
@@ -40,49 +40,43 @@ jobs:
           tag: ${{ inputs.tag }}
           prerelease-pattern: '^v\d{4}\.\d+\.\d+\.\d+-([A-Fa-f0-9]{4}|beta)$'
 
-      - name: Set up Python
-        uses: actions/setup-python@v7
-        with:
-          python-version: '3.13'
-
-      - name: Install
+      - name: Toolchain
         run: |
-          python -m pip install --upgrade pip
-          python -m pip install pyinstaller
-          python -m pip install -r requirements-win.txt -r requirements-dev.txt
+          rustup toolchain install stable --profile minimal --component clippy
+          rustup default stable
+
+      - name: NASM
+        uses: ilammy/setup-nasm@72793074d3c8cdda771dba85f6deafe00623038b
+        with:
+          version: 2.16.03
 
       - name: Validate
         run: |
-          python -m ruff format --check .
-          python -m ruff check .
-          python -m pytest
-
-      - name: Stamp the version
-        shell: pwsh
-        run: |
-          $version = '${{ steps.release_tag.outputs.version }}'
-          $line = 'VERSION = "' + $version + '"'
-          [System.IO.File]::WriteAllText('idlebot/windows/_version.py', "$line`n", [System.Text.UTF8Encoding]::new($false))
-          python -c "import sys; from idlebot.windows._version import VERSION; sys.exit(0 if VERSION == sys.argv[1] else 1)" $version
-          if ($LASTEXITCODE -ne 0) { throw "the stamped version did not read back as $version" }
+          cargo clippy --locked --all-targets -- -D warnings
+          cargo test --locked
 
       - name: Build the Windows executable
-        run: >
-          pyinstaller --onefile --clean --noconfirm --noconsole
-          --name discord-mobile-idle --distpath dist/exe --paths . --icon packaging/icon.ico
-          --collect-all curl_cffi --collect-all discord_protos
-          --collect-submodules discord --collect-submodules pystray
-          --hidden-import audioop packaging/entry.py
+        shell: pwsh
+        env:
+          IDLEBOT_VERSION: ${{ steps.release_tag.outputs.version }}
+        run: |
+          cargo build --release --locked --bin discord-mobile-idle
+          if ($LASTEXITCODE -ne 0) { throw "cargo build exited $LASTEXITCODE" }
+          New-Item -ItemType Directory -Force dist/exe | Out-Null
+          Copy-Item target/release/discord-mobile-idle.exe dist/exe/
 
       - name: Smoke test the executable
         shell: pwsh
         run: |
           $exe = 'dist/exe/discord-mobile-idle.exe'
+          $log = "$env:LOCALAPPDATA/discord-mobile-idle/self-test.log"
           $run = Start-Process -FilePath $exe -ArgumentList '--self-test' -Wait -PassThru
           if ($run.ExitCode -ne 0) {
-            Get-Content "$env:LOCALAPPDATA/discord-mobile-idle/self-test.log" -ErrorAction SilentlyContinue
+            Get-Content $log -ErrorAction SilentlyContinue
             throw "self test exited with $($run.ExitCode)."
           }
+          $stamped = Get-Content $log -Raw
+          if ($stamped -ne '${{ steps.release_tag.outputs.version }}') { throw "the exe reports version '$stamped'" }
 
       - name: Package
         id: package
@@ -116,7 +110,7 @@ jobs:
           extra: |
             ## Downloads
 
-            - `${{ steps.package.outputs.name }}` holds the Windows tray app. Unpack it anywhere and run the exe; no Python needed.
+            - `${{ steps.package.outputs.name }}` holds the Windows tray app. Unpack it anywhere and run the exe.
             - The Docker image is built from this repository, see the readme.
             - SHA256 of the zip: `${{ steps.checksums.outputs.sha256 }}`
             - Hashes for every file are in the attached `.integrity.tsv`.

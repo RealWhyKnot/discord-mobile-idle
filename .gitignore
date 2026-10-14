@@ -14,4 +14,3 @@ target/
 *.pid
 .env
 verify.local.ps1
-idlebot/windows/_version.py

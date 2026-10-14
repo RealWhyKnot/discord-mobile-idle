@@ -35,16 +35,22 @@ Start-Step 'Tests'
 & $python -m pytest
 Assert-ExitCode 'pytest'
 
-Start-Step 'Container code'
+Start-Step 'Rust code'
 $cargo = Get-Command cargo -ErrorAction SilentlyContinue
+if ($env:OS -eq 'Windows_NT' -and -not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+    $nasm = Get-ChildItem (Join-Path $env:LOCALAPPDATA 'Programs\nasm') -Filter nasm.exe -Recurse -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($nasm) { $env:PATH = "$($nasm.DirectoryName);$env:PATH" }
+}
 if (-not $cargo) {
     Write-Host 'cargo is not on PATH, skipping the Rust checks'
     $failures += 'Rust checks not run (no cargo)'
 } else {
     cargo fmt --check
     Assert-ExitCode 'cargo fmt'
-    if ($env:OS -eq 'Windows_NT') {
-        Write-Host 'the TLS library needs NASM to build on Windows, leaving clippy and the tests to verify.local.ps1 and CI'
+    if ($env:OS -eq 'Windows_NT' -and -not (Get-Command nasm -ErrorAction SilentlyContinue)) {
+        Write-Host 'the TLS library needs NASM to build on Windows and none was found'
+        $failures += 'Rust checks not run (no NASM)'
     } else {
         cargo clippy --locked --all-targets --quiet -- -D warnings
         Assert-ExitCode 'cargo clippy'
@@ -74,17 +80,15 @@ if ($SkipExe) {
 } elseif ($env:OS -ne 'Windows_NT') {
     Write-Host 'not Windows, skipping the executable'
     $failures += 'executable not built (not Windows)'
+} elseif ($failures -match 'Rust checks not run') {
+    Write-Host 'no Rust toolchain, skipping the executable'
+    $failures += 'executable not built (no Rust toolchain)'
 } else {
-    & $python -m PyInstaller --onefile --clean --noconfirm --noconsole --log-level WARN `
-        --name discord-mobile-idle --distpath dist/verify --workpath build/verify `
-        --paths . --icon packaging/icon.ico `
-        --collect-all curl_cffi --collect-all discord_protos `
-        --collect-submodules discord --collect-submodules pystray `
-        --hidden-import audioop packaging/entry.py
-    Assert-ExitCode 'pyinstaller'
+    cargo build --release --locked --bin discord-mobile-idle
+    Assert-ExitCode 'cargo build'
     $selfTestLog = Join-Path $env:LOCALAPPDATA 'discord-mobile-idle\self-test.log'
     Remove-Item $selfTestLog -Force -ErrorAction SilentlyContinue
-    $run = Start-Process -FilePath 'dist/verify/discord-mobile-idle.exe' -ArgumentList '--self-test' -Wait -PassThru
+    $run = Start-Process -FilePath 'target/release/discord-mobile-idle.exe' -ArgumentList '--self-test' -Wait -PassThru
     if ($run.ExitCode -ne 0) {
         if (Test-Path $selfTestLog) { Get-Content $selfTestLog }
         throw "self test exited $($run.ExitCode)"
