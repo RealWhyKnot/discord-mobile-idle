@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -8,13 +9,15 @@ use std::time::Duration;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{sleep, sleep_until, timeout, Instant};
 
-use crate::controller::{Clock, Debouncer, StatusController, INVISIBLE, OFFLINE};
+use crate::config::py_bool;
+use crate::controller::{Clock, Debouncer, StatusController, DND, INVISIBLE, OFFLINE, ONLINE};
 use crate::persist::Marker;
 use crate::{error, info, warning};
 
 pub const LIVENESS_SECONDS: f64 = 1800.0;
 pub const WRITE_TIMEOUT: f64 = 45.0;
 pub const ECHO_SECONDS: f64 = 90.0;
+pub const ECHOES_KEPT: usize = 4;
 pub const DISCONNECT_LIMIT: f64 = 900.0;
 pub const CLOSE_WAIT: Duration = Duration::from_secs(15);
 pub const UNKNOWN: &str = "unknown";
@@ -58,14 +61,6 @@ fn hidden(status: &str) -> bool {
     status == INVISIBLE || status == OFFLINE
 }
 
-fn py_bool(value: bool) -> &'static str {
-    if value {
-        "True"
-    } else {
-        "False"
-    }
-}
-
 fn py_opt(value: &Option<String>) -> &str {
     value.as_deref().unwrap_or("None")
 }
@@ -77,6 +72,7 @@ pub trait Client {
     fn status(&self) -> String;
     fn saved_status(&self) -> String;
     fn own_status(&self) -> Option<String>;
+    fn games(&self) -> Vec<String>;
     async fn check_token(&self) -> Result<(), Error>;
     async fn change_presence(&self, status: &str) -> Result<(), Error>;
     async fn hide(&self) -> Result<(), Error>;
@@ -101,6 +97,7 @@ pub trait Session {
 
 pub enum Change<'a> {
     Wrote(&'a str),
+    Playing,
     Shown(&'a str),
     Hidden { by_choice: bool },
 }
@@ -111,10 +108,16 @@ pub struct Runner<C: Client, M: Marker> {
     pub client: C,
     pub controller: StatusController,
     pub debouncer: Debouncer,
+    pub game: StatusController,
+    pub playing: Debouncer,
+    pub games: bool,
+    pub game_ignore: Vec<String>,
+    pub now_playing: Vec<String>,
     pub poll_seconds: u64,
     pub observe: bool,
     pub clock: Clock,
     pub marker: Option<M>,
+    pub game_marker: Option<M>,
     pub write_timeout: f64,
     pub echo_seconds: f64,
     pub stats: Option<Box<dyn Fn() -> String>>,
@@ -127,13 +130,14 @@ pub struct Runner<C: Client, M: Marker> {
     pub stood_down: bool,
     pub following: bool,
     pub user_status: Option<String>,
-    pub setting_echo: Option<String>,
+    pub setting_echoes: Vec<String>,
     pub presence: Option<String>,
     pub expect: Option<(String, f64)>,
     pub reassert: bool,
     pub connected: bool,
     pub disconnected_at: Option<f64>,
     pub marked: Option<String>,
+    pub game_marked: Option<String>,
     pub gave_up: Option<String>,
     pub transitions: u64,
     pub wake: bool,
@@ -153,14 +157,29 @@ impl<C: Client, M: Marker> Runner<C, M> {
         marker: Option<M>,
     ) -> Self {
         let now = clock();
+        let mut game = StatusController::new(
+            &controller.default_restore,
+            BTreeSet::from([ONLINE.to_string()]),
+            controller.grace_seconds,
+            clock.clone(),
+        );
+        game.idle_status = DND;
+        game.adopt = false;
+        let playing = Debouncer::new(debouncer.on_polls, debouncer.off_polls);
         Runner {
             client,
             controller,
             debouncer,
+            game,
+            playing,
+            games: false,
+            game_ignore: Vec::new(),
+            now_playing: Vec::new(),
             poll_seconds,
             observe,
             clock,
             marker,
+            game_marker: None,
             write_timeout: WRITE_TIMEOUT,
             echo_seconds: ECHO_SECONDS,
             stats: None,
@@ -173,13 +192,14 @@ impl<C: Client, M: Marker> Runner<C, M> {
             stood_down: false,
             following: false,
             user_status: None,
-            setting_echo: None,
+            setting_echoes: Vec::new(),
             presence: None,
             expect: None,
             reassert: false,
             connected: true,
             disconnected_at: None,
             marked: None,
+            game_marked: None,
             gave_up: None,
             transitions: 0,
             wake: false,
@@ -204,20 +224,71 @@ impl<C: Client, M: Marker> Runner<C, M> {
         }
     }
 
+    fn game_names(&self) -> Vec<String> {
+        if !self.games {
+            return Vec::new();
+        }
+        let mut names = self.client.games();
+        names.retain(|name| !self.game_ignore.contains(&name.to_lowercase()));
+        names
+    }
+
+    pub fn wake_if_playing(&mut self) {
+        if !self.playing.stable && !self.game_names().is_empty() {
+            self.wake = true;
+        }
+    }
+
+    fn update_playing(&mut self) -> bool {
+        let names = self.game_names();
+        if names != self.now_playing {
+            if names.is_empty() {
+                info!("stopped playing {}", self.now_playing.join(", "));
+            } else {
+                info!("playing {}", names.join(", "));
+            }
+            self.now_playing = names;
+        }
+        self.playing.update(!self.now_playing.is_empty())
+    }
+
     pub fn recover(&mut self) {
         if self.observe {
             return;
         }
-        let Some(saved) = self.marker.as_ref().and_then(|m| m.read()) else {
-            return;
-        };
-        self.controller.resume_hold(&saved);
-        self.debouncer.force(true);
-        info!(
-            "picking up a hold from before the restart, will restore {} once the phone goes",
-            saved
-        );
-        self.marked = Some(saved);
+        let mut phone = self.marker.as_ref().and_then(|m| m.read());
+        let mut game = self.game_marker.as_ref().and_then(|m| m.read());
+        if phone.is_some() && game.is_some() {
+            if self.client.status() == self.game.idle_status {
+                phone = None;
+                if let Some(m) = self.marker.as_mut() {
+                    m.clear();
+                }
+            } else {
+                game = None;
+                if let Some(m) = self.game_marker.as_mut() {
+                    m.clear();
+                }
+            }
+        }
+        if let Some(saved) = phone {
+            self.controller.resume_hold(&saved);
+            self.debouncer.force(true);
+            info!(
+                "picking up a hold from before the restart, will restore {} once the phone goes",
+                saved
+            );
+            self.marked = Some(saved);
+        }
+        if let Some(saved) = game {
+            self.game.resume_hold(&saved);
+            self.playing.force(true);
+            info!(
+                "picking up do not disturb from before the restart, will restore {} once the game ends",
+                saved
+            );
+            self.game_marked = Some(saved);
+        }
     }
 
     pub fn seed_user_status(&mut self) {
@@ -226,6 +297,9 @@ impl<C: Client, M: Marker> Runner<C, M> {
             return;
         }
         if status == self.controller.idle_status && self.idle_may_be_ours() {
+            return;
+        }
+        if status == self.game.idle_status && self.game.holding {
             return;
         }
         self.user_status = Some(status);
@@ -245,11 +319,14 @@ impl<C: Client, M: Marker> Runner<C, M> {
         if previous == Some(status) {
             return;
         }
-        if self.setting_echo.as_deref() == Some(status) {
-            self.setting_echo = None;
+        if let Some(i) = self.setting_echoes.iter().position(|s| s == status) {
+            self.setting_echoes.drain(..=i);
             return;
         }
         if status == self.controller.idle_status && self.controller.holding {
+            return;
+        }
+        if status == self.game.idle_status && self.game.holding {
             return;
         }
         self.user_status = Some(status.to_string());
@@ -273,6 +350,7 @@ impl<C: Client, M: Marker> Runner<C, M> {
 
     pub fn on_ready(&mut self, first: bool) {
         self.debouncer.reset();
+        self.playing.reset();
         if first {
             self.recover();
         }
@@ -286,12 +364,17 @@ impl<C: Client, M: Marker> Runner<C, M> {
             Note::Resumed => {
                 info!("gateway resumed");
                 self.debouncer.reset();
+                self.playing.reset();
                 self.note_connected();
                 self.touch();
                 self.wake_if_mobile();
+                self.wake_if_playing();
             }
             Note::Disconnected => self.note_disconnected(),
-            Note::Sessions => self.wake_if_mobile(),
+            Note::Sessions => {
+                self.wake_if_mobile();
+                self.wake_if_playing();
+            }
             Note::Settings { after, before } => self.note_settings(&after, Some(&before)),
             Note::Ready | Note::Ended(_) => {}
         }
@@ -360,7 +443,7 @@ impl<C: Client, M: Marker> Runner<C, M> {
             self.returning = false;
         }
         self.manage().await?;
-        if others == 0 && !self.controller.holding && !self.debouncer.stable {
+        if others == 0 && !self.controller.holding && !self.game.holding && !self.debouncer.stable {
             self.hide().await?;
         }
         Ok(())
@@ -398,10 +481,17 @@ impl<C: Client, M: Marker> Runner<C, M> {
     }
 
     async fn write(&mut self, status: &str) -> Result<(), Error> {
-        self.setting_echo = Some(status.to_string());
+        self.setting_echoes.push(status.to_string());
+        if self.setting_echoes.len() > ECHOES_KEPT {
+            self.setting_echoes.remove(0);
+        }
         self.client.change_presence(status).await?;
         self.sent(status);
-        self.changed(Change::Wrote(status));
+        if self.game.holding && status == self.game.idle_status {
+            self.changed(Change::Playing);
+        } else {
+            self.changed(Change::Wrote(status));
+        }
         Ok(())
     }
 
@@ -436,6 +526,7 @@ impl<C: Client, M: Marker> Runner<C, M> {
             return Ok(());
         }
         self.controller.stand_down();
+        self.game.stand_down();
         self.hidden = false;
         self.returning = false;
         self.following = false;
@@ -486,8 +577,9 @@ impl<C: Client, M: Marker> Runner<C, M> {
     async fn manage(&mut self) -> Result<(), Error> {
         let raw = self.client.is_on_mobile();
         let stable = self.debouncer.update(raw);
+        let playing = self.update_playing();
         if self.wants_idle() {
-            return self.follow_idle(stable).await;
+            return self.follow_idle(stable, playing).await;
         }
         if self.following {
             self.stop_following().await?;
@@ -495,14 +587,15 @@ impl<C: Client, M: Marker> Runner<C, M> {
         let current = self.simulated.clone().unwrap_or_else(|| self.client.status());
         if self.observe {
             info!(
-                "observe: raw_mobile={} stable={} status={}",
+                "observe: raw_mobile={} stable={} playing={} status={}",
                 py_bool(raw),
                 py_bool(stable),
+                py_bool(playing),
                 current
             );
         }
         if self.pending.is_none() {
-            self.pending = self.controller.evaluate(stable, &current);
+            self.pending = self.decide(stable, playing, &current);
         }
         let Some(pending) = self.pending.clone() else {
             return Ok(());
@@ -513,10 +606,11 @@ impl<C: Client, M: Marker> Runner<C, M> {
         }
         if self.observe {
             info!(
-                "observe: would set {} -> {} (on_mobile={})",
+                "observe: would set {} -> {} (on_mobile={} playing={})",
                 current,
                 pending,
-                py_bool(stable)
+                py_bool(stable),
+                py_bool(playing)
             );
             self.simulated = Some(pending);
             self.pending = None;
@@ -524,13 +618,53 @@ impl<C: Client, M: Marker> Runner<C, M> {
         }
         self.write(&pending).await?;
         self.transitions += 1;
-        info!("status {} -> {} (on_mobile={})", current, pending, py_bool(stable));
+        info!(
+            "status {} -> {} (on_mobile={} playing={})",
+            current,
+            pending,
+            py_bool(stable),
+            py_bool(playing)
+        );
         self.pending = None;
         Ok(())
     }
 
-    async fn follow_idle(&mut self, stable: bool) -> Result<(), Error> {
+    fn decide(&mut self, stable: bool, playing: bool, current: &str) -> Option<String> {
+        let phone_held = self.controller.holding && current == self.controller.idle_status;
+        let seen = if phone_held {
+            self.controller.restore_target()
+        } else {
+            current.to_string()
+        };
+        let was_holding = self.game.holding;
+        let game = if phone_held && playing && !was_holding && seen == self.game.idle_status {
+            self.game.resume_hold(&seen);
+            Some(seen)
+        } else {
+            self.game.evaluate(playing, &seen)
+        };
+        if self.game.holding {
+            self.controller.step_aside(stable);
+            return game;
+        }
+        if !was_holding {
+            return self.controller.evaluate(stable, current);
+        }
+        let Some(target) = game else {
+            self.controller.step_aside(stable);
+            return None;
+        };
+        if stable && self.controller.managed.contains(&target) {
+            self.controller.resume_hold(&target);
+            return Some(self.controller.idle_status.to_string());
+        }
         self.controller.step_aside(stable);
+        Some(target)
+    }
+
+    async fn follow_idle(&mut self, stable: bool, playing: bool) -> Result<(), Error> {
+        self.controller.step_aside(stable);
+        self.game.step_aside(playing);
         self.pending = None;
         if self.following {
             return Ok(());
@@ -558,35 +692,35 @@ impl<C: Client, M: Marker> Runner<C, M> {
         if self.observe {
             return;
         }
-        let Some(marker) = self.marker.as_mut() else {
-            return;
-        };
-        let want = if self.controller.holding {
-            Some(self.controller.restore_target())
+        let phone = self.controller.holding.then(|| self.controller.restore_target());
+        let game = self.game.holding.then(|| self.game.restore_target());
+        if phone.is_some() {
+            sync_one(&mut self.marker, &mut self.marked, phone);
+            sync_one(&mut self.game_marker, &mut self.game_marked, game);
         } else {
-            None
-        };
-        if want == self.marked {
-            return;
+            sync_one(&mut self.game_marker, &mut self.game_marked, game);
+            sync_one(&mut self.marker, &mut self.marked, phone);
         }
-        match &want {
-            None => marker.clear(),
-            Some(status) => marker.write(status),
-        }
-        self.marked = want;
     }
 
     pub async fn hand_back(&mut self) -> Result<(), Error> {
-        if self.observe || !self.controller.holding {
+        if self.observe {
             return Ok(());
         }
-        let target = self.controller.restore_target();
+        let held = [&self.controller, &self.game]
+            .into_iter()
+            .find(|c| c.holding)
+            .map(|c| (c.restore_target(), c.idle_status));
+        let Some((target, ours)) = held else {
+            return Ok(());
+        };
         let current = self.client.status();
-        if current == self.controller.idle_status || current == target {
+        self.controller.release();
+        self.game.release();
+        if current == ours || current == target {
             self.write(&target).await?;
             info!("restored {} on shutdown", target);
         }
-        self.controller.release();
         self.sync_marker();
         Ok(())
     }
@@ -610,11 +744,13 @@ impl<C: Client, M: Marker> Runner<C, M> {
         }
         self.last_liveness = now;
         info!(
-            "alive uptime={:.0}s transitions={} on_mobile={} holding={} hidden={} returning={} following={} you={}",
+            "alive uptime={:.0}s transitions={} on_mobile={} holding={} playing={} game_holding={} hidden={} returning={} following={} you={}",
             now - self.started,
             self.transitions,
             py_bool(self.debouncer.stable),
             py_bool(self.controller.holding),
+            py_bool(self.playing.stable),
+            py_bool(self.game.holding),
             py_bool(self.hidden),
             py_bool(self.returning),
             py_bool(self.following),
@@ -634,6 +770,20 @@ impl<C: Client, M: Marker> Runner<C, M> {
             Err(_) => warning!("token check failed: timed out"),
         }
     }
+}
+
+fn sync_one<M: Marker>(marker: &mut Option<M>, marked: &mut Option<String>, want: Option<String>) {
+    let Some(marker) = marker.as_mut() else {
+        return;
+    };
+    if want == *marked {
+        return;
+    }
+    match &want {
+        None => marker.clear(),
+        Some(status) => marker.write(status),
+    }
+    *marked = want;
 }
 
 enum Outcome {
@@ -814,6 +964,7 @@ pub(crate) mod tests {
         pub token_checks: u32,
         pub hang: bool,
         pub unhide_error: Option<Error>,
+        pub games: Vec<String>,
     }
 
     #[derive(Clone)]
@@ -841,6 +992,7 @@ pub(crate) mod tests {
                 token_checks: 0,
                 hang: false,
                 unhide_error: None,
+                games: vec![],
             })))
         }
 
@@ -854,6 +1006,10 @@ pub(crate) mod tests {
 
         pub fn set_status(&self, value: &str) {
             self.f().status = value.into();
+        }
+
+        pub fn set_games(&self, names: &[&str]) {
+            self.f().games = names.iter().map(|n| n.to_string()).collect();
         }
 
         pub fn calls(&self) -> Vec<String> {
@@ -885,6 +1041,9 @@ pub(crate) mod tests {
         }
         fn own_status(&self) -> Option<String> {
             self.0.borrow().own.clone()
+        }
+        fn games(&self) -> Vec<String> {
+            self.0.borrow().games.clone()
         }
         async fn check_token(&self) -> Result<(), Error> {
             let mut f = self.f();
@@ -1545,7 +1704,7 @@ pub(crate) mod tests {
         apply_echoes(&mut runner);
         assert_eq!(client.calls(), v(&[IDLE, ONLINE]));
         assert_eq!(runner.user_status, None);
-        assert_eq!(runner.setting_echo, None);
+        assert!(runner.setting_echoes.is_empty());
     }
 
     #[tokio::test]
@@ -1557,7 +1716,7 @@ pub(crate) mod tests {
         runner.hand_back().await.unwrap();
         apply_echoes(&mut runner);
         assert_eq!(runner.user_status, None);
-        assert_eq!(runner.setting_echo, None);
+        assert!(runner.setting_echoes.is_empty());
     }
 
     #[tokio::test]
@@ -2659,5 +2818,574 @@ pub(crate) mod tests {
         assert!(d.watchdog.check());
         assert!(!d.watchdog.check());
         assert_eq!(d.fired(), 1);
+    }
+
+    const GAME: &str = "PowerWash Simulator";
+
+    fn gamer(client: &FakeClient, o: Opts) -> TestRunner {
+        let mut runner = make(client, o);
+        runner.games = true;
+        runner
+    }
+
+    #[tokio::test]
+    async fn a_game_sets_dnd_and_its_end_puts_online_back() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        runner.tick().await.unwrap();
+        assert!(client.calls().is_empty());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND]));
+        assert!(runner.game.holding);
+        drive(&mut runner, 3).await;
+        assert_eq!(client.calls(), v(&[DND]));
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND, ONLINE]));
+        assert!(!runner.game.holding);
+    }
+
+    fn record_changes(runner: &mut TestRunner) -> Rc<RefCell<Vec<String>>> {
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let log = seen.clone();
+        runner.on_change = Some(Box::new(move |change| {
+            log.borrow_mut().push(match change {
+                Change::Wrote(status) => status.to_string(),
+                Change::Playing => "playing".into(),
+                Change::Shown(status) => format!("shown {}", status),
+                Change::Hidden { .. } => "hidden".into(),
+            })
+        }));
+        seen
+    }
+
+    #[tokio::test]
+    async fn the_game_hold_reports_itself_apart_from_other_writes() {
+        let client = FakeClient::with(ONLINE, false, 1, None);
+        let mut runner = gamer(&client, Opts::default());
+        let seen = record_changes(&mut runner);
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_games(&[]);
+        client.set_mobile(true);
+        runner.tick().await.unwrap();
+        client.set_mobile(false);
+        runner.tick().await.unwrap();
+        assert_eq!(*seen.borrow(), v(&["playing", IDLE, ONLINE]));
+    }
+
+    #[tokio::test]
+    async fn games_change_nothing_unless_turned_on() {
+        let client = FakeClient::new();
+        let mut runner = plain(&client);
+        client.set_games(&[GAME]);
+        drive(&mut runner, 3).await;
+        assert!(client.calls().is_empty());
+        assert!(runner.now_playing.is_empty());
+    }
+
+    #[tokio::test]
+    async fn an_ignored_game_does_not_count() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        runner.game_ignore = vec!["wallpaper engine".into()];
+        client.set_games(&["Wallpaper Engine"]);
+        drive(&mut runner, 2).await;
+        assert!(client.calls().is_empty());
+        client.set_games(&["Wallpaper Engine", "VRChat"]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND]));
+        assert_eq!(runner.now_playing, v(&["VRChat"]));
+    }
+
+    #[tokio::test]
+    async fn the_game_has_to_stay_closed_for_the_off_polls() {
+        let client = FakeClient::new();
+        let mut runner = gamer(
+            &client,
+            Opts {
+                off_polls: 3,
+                ..Opts::default()
+            },
+        );
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_games(&[]);
+        drive(&mut runner, 2).await;
+        client.set_games(&[GAME]);
+        drive(&mut runner, 2).await;
+        client.set_games(&[]);
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND]));
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND, ONLINE]));
+    }
+
+    #[tokio::test]
+    async fn a_dnd_you_set_yourself_outlasts_the_game() {
+        let client = FakeClient::with(DND, false, 1, None);
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        drive(&mut runner, 2).await;
+        client.set_games(&[]);
+        drive(&mut runner, 2).await;
+        assert!(client.calls().is_empty());
+        assert_eq!(client.status(), DND);
+    }
+
+    #[tokio::test]
+    async fn picking_a_status_mid_game_keeps_it_until_the_next_game() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_status(ONLINE);
+        runner.note_settings(ONLINE, Some(DND));
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND]));
+        assert!(!runner.game.holding);
+        client.set_games(&[]);
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND]));
+        client.set_games(&["VRChat"]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND, DND]));
+    }
+
+    #[tokio::test]
+    async fn a_game_takes_over_from_the_phone_and_hands_it_back() {
+        let client = FakeClient::with(ONLINE, true, 1, None);
+        let mut runner = gamer(&client, Opts::default());
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE]));
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE, DND]));
+        assert!(!runner.controller.holding);
+        assert_eq!(runner.game.saved, s(ONLINE));
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE, DND, IDLE]));
+        assert!(runner.controller.holding);
+        client.set_mobile(false);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE, DND, IDLE, ONLINE]));
+    }
+
+    #[tokio::test]
+    async fn the_phone_arriving_mid_game_waits_for_the_game_to_end() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_mobile(true);
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND]));
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND, IDLE]));
+        client.set_mobile(false);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND, IDLE, ONLINE]));
+    }
+
+    #[tokio::test]
+    async fn the_phone_never_takes_a_dnd_the_game_holds() {
+        let client = FakeClient::new();
+        let mut runner = gamer(
+            &client,
+            Opts {
+                managed: vec![ONLINE, DND],
+                ..Opts::default()
+            },
+        );
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_mobile(true);
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND]));
+        assert!(!runner.controller.holding);
+    }
+
+    #[tokio::test]
+    async fn a_managed_dnd_under_the_phone_shows_through_a_game() {
+        let client = FakeClient::with(DND, true, 1, None);
+        let mut runner = gamer(
+            &client,
+            Opts {
+                managed: vec![ONLINE, DND],
+                ..Opts::default()
+            },
+        );
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE]));
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE, DND]));
+        assert!(runner.game.holding && !runner.controller.holding);
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE, DND, IDLE]));
+        client.set_mobile(false);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE, DND, IDLE, DND]));
+    }
+
+    #[tokio::test]
+    async fn a_game_ending_on_the_dnd_you_had_leaves_it_there() {
+        let client = FakeClient::with(DND, true, 1, None);
+        let mut runner = gamer(
+            &client,
+            Opts {
+                managed: vec![ONLINE, DND],
+                ..Opts::default()
+            },
+        );
+        runner.tick().await.unwrap();
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_mobile(false);
+        runner.tick().await.unwrap();
+        client.set_games(&[]);
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[IDLE, DND]));
+        assert!(!runner.game.holding && !runner.controller.holding);
+        assert_eq!(client.status(), DND);
+    }
+
+    #[tokio::test]
+    async fn choosing_idle_mid_game_drops_the_dnd_hold() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        runner.note_settings(IDLE, Some(DND));
+        runner.tick().await.unwrap();
+        assert!(!runner.game.holding);
+        assert!(runner.following);
+        client.set_games(&[]);
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND]));
+        assert_eq!(client.presence(), v(&[IDLE]));
+    }
+
+    #[tokio::test]
+    async fn choosing_invisible_mid_game_drops_the_dnd_hold() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        runner.note_settings(INVISIBLE, Some(DND));
+        runner.tick().await.unwrap();
+        assert!(!runner.game.holding);
+        assert!(runner.stood_down);
+        client.set_games(&[]);
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND]));
+    }
+
+    #[tokio::test]
+    async fn coming_back_from_invisible_mid_game_sets_dnd_again() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        runner.note_settings(INVISIBLE, Some(DND));
+        runner.tick().await.unwrap();
+        runner.note_settings(ONLINE, Some(INVISIBLE));
+        runner.tick().await.unwrap();
+        assert_eq!(client.presence(), v(&[INVISIBLE, ONLINE]));
+        assert_eq!(client.calls(), v(&[DND, DND]));
+        assert!(runner.game.holding);
+    }
+
+    #[tokio::test]
+    async fn never_goes_offline_while_a_game_holds_dnd() {
+        let client = FakeClient::new();
+        let mut runner = gamer(
+            &client,
+            Opts {
+                off_polls: 3,
+                ..Opts::default()
+            },
+        );
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.f().others = 0;
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert!(client.presence().is_empty());
+        drive(&mut runner, 2).await;
+        assert_eq!(client.calls(), v(&[DND, ONLINE]));
+        assert_eq!(client.presence(), v(&[INVISIBLE]));
+    }
+
+    #[tokio::test]
+    async fn the_dnd_echo_is_not_read_as_your_choice() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.f().during_write = Some(Box::new(|status| {
+            (status.into(), if status == DND { ONLINE.into() } else { DND.into() })
+        }));
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        apply_echoes(&mut runner);
+        runner.note_settings(DND, Some(ONLINE));
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        apply_echoes(&mut runner);
+        assert_eq!(client.calls(), v(&[DND, ONLINE]));
+        assert_eq!(runner.user_status, None);
+    }
+
+    #[tokio::test]
+    async fn a_shutdown_restore_is_not_reported_as_playing() {
+        let client = FakeClient::with(DND, true, 1, None);
+        let mut runner = gamer(
+            &client,
+            Opts {
+                managed: vec![ONLINE, DND],
+                ..Opts::default()
+            },
+        );
+        runner.tick().await.unwrap();
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        let seen = record_changes(&mut runner);
+        runner.hand_back().await.unwrap();
+        assert_eq!(client.calls(), v(&[IDLE, DND, DND]));
+        assert_eq!(*seen.borrow(), v(&[DND]));
+    }
+
+    #[tokio::test]
+    async fn a_late_idle_echo_after_a_game_starts_is_still_ours() {
+        let client = FakeClient::with(ONLINE, true, 1, None);
+        let mut runner = gamer(&client, Opts::default());
+        client.f().during_write = Some(Box::new(|status| {
+            (status.into(), if status == IDLE { ONLINE.into() } else { IDLE.into() })
+        }));
+        runner.tick().await.unwrap();
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        apply_echoes(&mut runner);
+        drive(&mut runner, 2).await;
+        assert_eq!(runner.user_status, None);
+        assert!(runner.setting_echoes.is_empty());
+        assert!(runner.game.holding && !runner.following);
+        assert_eq!(client.calls(), v(&[IDLE, DND]));
+    }
+
+    #[tokio::test]
+    async fn only_the_last_few_writes_wait_for_an_echo() {
+        let client = FakeClient::new();
+        let mut runner = plain(&client);
+        for status in [IDLE, ONLINE, IDLE, ONLINE, DND, ONLINE] {
+            runner.write(status).await.unwrap();
+        }
+        assert_eq!(runner.setting_echoes, v(&[IDLE, ONLINE, DND, ONLINE]));
+        runner.note_settings(DND, Some(ONLINE));
+        assert_eq!(runner.setting_echoes, v(&[ONLINE]));
+        assert_eq!(runner.user_status, None);
+        runner.note_settings(IDLE, Some(ONLINE));
+        assert_eq!(runner.user_status, s(IDLE));
+    }
+
+    #[tokio::test]
+    async fn after_a_kill_mid_handover_the_hold_matching_the_status_wins() {
+        for (status, phone_kept) in [(DND, false), (IDLE, true)] {
+            let client = FakeClient::with(status, true, 1, None);
+            let phone = MemoryMarker::holding(ONLINE);
+            let game = MemoryMarker::holding(ONLINE);
+            let mut runner = gamer(
+                &client,
+                Opts {
+                    marker: Some(phone.clone()),
+                    ..Opts::default()
+                },
+            );
+            runner.game_marker = Some(game.clone());
+            runner.recover();
+            assert_eq!(runner.controller.holding, phone_kept, "{}", status);
+            assert_eq!(runner.game.holding, !phone_kept, "{}", status);
+            assert_eq!(phone.value().is_some(), phone_kept, "{}", status);
+            assert_eq!(game.value().is_some(), !phone_kept, "{}", status);
+        }
+    }
+
+    #[derive(Clone)]
+    struct OrderMarker(&'static str, Rc<RefCell<Vec<String>>>);
+
+    impl Marker for OrderMarker {
+        fn read(&self) -> Option<String> {
+            None
+        }
+        fn write(&mut self, status: &str) {
+            self.1.borrow_mut().push(format!("{} {}", self.0, status));
+        }
+        fn clear(&mut self) {
+            self.1.borrow_mut().push(format!("{} clear", self.0));
+        }
+    }
+
+    #[tokio::test]
+    async fn a_handover_writes_the_new_marker_before_clearing_the_old() {
+        let client = FakeClient::with(ONLINE, true, 1, None);
+        let log = Rc::new(RefCell::new(Vec::new()));
+        let clock = FakeClock::new();
+        let mut runner = Runner::new(
+            client.clone(),
+            make_controller(&[ONLINE], ONLINE, 0.0, &clock),
+            Debouncer::new(1, 1),
+            0,
+            false,
+            clock.clock(),
+            Some(OrderMarker("phone", log.clone())),
+        );
+        runner.games = true;
+        runner.game_marker = Some(OrderMarker("game", log.clone()));
+        runner.tick().await.unwrap();
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(
+            *log.borrow(),
+            v(&[
+                "phone online",
+                "game online",
+                "phone clear",
+                "phone online",
+                "game clear"
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn a_game_starting_wakes_the_loop() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        runner.apply(Note::Sessions);
+        assert!(!runner.wake);
+        client.set_games(&[GAME]);
+        runner.apply(Note::Sessions);
+        assert!(runner.wake);
+        runner.wake = false;
+        runner.tick().await.unwrap();
+        runner.apply(Note::Sessions);
+        assert!(!runner.wake);
+    }
+
+    #[tokio::test]
+    async fn observe_mode_simulates_a_game_without_writing() {
+        let client = FakeClient::new();
+        let mut runner = gamer(
+            &client,
+            Opts {
+                observe: true,
+                ..Opts::default()
+            },
+        );
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        assert_eq!(runner.simulated, s(DND));
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(runner.simulated, s(ONLINE));
+        assert!(client.calls().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_game_hold_keeps_its_own_marker() {
+        let client = FakeClient::new();
+        let phone = MemoryMarker::default();
+        let game = MemoryMarker::default();
+        let mut runner = gamer(
+            &client,
+            Opts {
+                marker: Some(phone.clone()),
+                ..Opts::default()
+            },
+        );
+        runner.game_marker = Some(game.clone());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        assert_eq!(game.value(), s(ONLINE));
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(game.writes(), vec![s(ONLINE), None]);
+        assert!(phone.writes().is_empty());
+    }
+
+    #[tokio::test]
+    async fn the_phone_marker_hands_over_to_the_game_marker_and_back() {
+        let client = FakeClient::with(ONLINE, true, 1, None);
+        let phone = MemoryMarker::default();
+        let game = MemoryMarker::default();
+        let mut runner = gamer(
+            &client,
+            Opts {
+                marker: Some(phone.clone()),
+                ..Opts::default()
+            },
+        );
+        runner.game_marker = Some(game.clone());
+        runner.tick().await.unwrap();
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        assert_eq!((phone.value(), game.value()), (None, s(ONLINE)));
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!((phone.value(), game.value()), (s(ONLINE), None));
+    }
+
+    #[tokio::test]
+    async fn recovery_finishes_a_game_hold_from_before_the_restart() {
+        let client = FakeClient::with(DND, false, 1, Some(DND));
+        let game = MemoryMarker::holding(ONLINE);
+        let mut runner = gamer(&client, Opts::default());
+        runner.game_marker = Some(game.clone());
+        runner.recover();
+        runner.seed_user_status();
+        assert_eq!(runner.user_status, None);
+        client.set_games(&[GAME]);
+        drive(&mut runner, 2).await;
+        assert!(client.calls().is_empty());
+        client.set_games(&[]);
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[ONLINE]));
+        assert_eq!(game.value(), None);
+    }
+
+    #[tokio::test]
+    async fn recovery_still_restores_with_games_turned_off() {
+        let client = FakeClient::with(DND, false, 1, Some(DND));
+        let mut runner = plain(&client);
+        runner.game_marker = Some(MemoryMarker::holding(ONLINE));
+        runner.recover();
+        runner.tick().await.unwrap();
+        assert_eq!(client.calls(), v(&[ONLINE]));
+    }
+
+    #[tokio::test]
+    async fn shutdown_mid_game_puts_the_status_back() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        runner.hand_back().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND, ONLINE]));
+        assert!(!runner.game.holding);
+    }
+
+    #[tokio::test]
+    async fn shutdown_mid_game_leaves_a_status_someone_else_set() {
+        let client = FakeClient::new();
+        let mut runner = gamer(&client, Opts::default());
+        client.set_games(&[GAME]);
+        runner.tick().await.unwrap();
+        client.set_status(INVISIBLE);
+        runner.hand_back().await.unwrap();
+        assert_eq!(client.calls(), v(&[DND]));
     }
 }

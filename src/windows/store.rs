@@ -20,13 +20,15 @@ use crate::log::{self, Rotating};
 pub const APP: &str = "discord-mobile-idle";
 const RUN_KEY: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
 
-pub const DEFAULT_SETTINGS: [(&str, &str); 9] = [
+pub const DEFAULT_SETTINGS: [(&str, &str); 11] = [
     ("POLL_SECONDS", "10"),
     ("RESTORE_STATUS", "online"),
     ("MANAGED_STATUSES", "online"),
     ("ON_DEBOUNCE_POLLS", "2"),
     ("OFF_DEBOUNCE_POLLS", "4"),
     ("WATCHDOG_SECONDS", "120"),
+    ("GAME_DND", "true"),
+    ("GAME_IGNORE", ""),
     ("UPDATE_CHANNEL", "release"),
     ("CHECK_FOR_UPDATES", "true"),
     ("SKIPPED_TAG", ""),
@@ -252,10 +254,10 @@ mod tests {
 
     #[test]
     fn default_settings_match_the_python_dump() {
-        let expected = "{\r\n  \"POLL_SECONDS\": \"10\",\r\n  \"RESTORE_STATUS\": \"online\",\r\n  \"MANAGED_STATUSES\": \"online\",\r\n  \"ON_DEBOUNCE_POLLS\": \"2\",\r\n  \"OFF_DEBOUNCE_POLLS\": \"4\",\r\n  \"WATCHDOG_SECONDS\": \"120\",\r\n  \"UPDATE_CHANNEL\": \"release\",\r\n  \"CHECK_FOR_UPDATES\": \"true\",\r\n  \"SKIPPED_TAG\": \"\"\r\n}";
+        let expected = "{\r\n  \"POLL_SECONDS\": \"10\",\r\n  \"RESTORE_STATUS\": \"online\",\r\n  \"MANAGED_STATUSES\": \"online\",\r\n  \"ON_DEBOUNCE_POLLS\": \"2\",\r\n  \"OFF_DEBOUNCE_POLLS\": \"4\",\r\n  \"WATCHDOG_SECONDS\": \"120\",\r\n  \"GAME_DND\": \"true\",\r\n  \"GAME_IGNORE\": \"\",\r\n  \"UPDATE_CHANNEL\": \"release\",\r\n  \"CHECK_FOR_UPDATES\": \"true\",\r\n  \"SKIPPED_TAG\": \"\"\r\n}";
         assert_eq!(default_settings_text(), expected);
         let parsed = parse_settings(&default_settings_text());
-        assert_eq!(parsed.len(), 9);
+        assert_eq!(parsed.len(), 11);
         assert_eq!(parsed["ON_DEBOUNCE_POLLS"], "2");
     }
 

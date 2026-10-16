@@ -11,6 +11,16 @@ pub struct Config {
     pub on_polls: u32,
     pub off_polls: u32,
     pub watchdog_seconds: u64,
+    pub game_dnd: bool,
+    pub game_ignore: Vec<String>,
+}
+
+pub fn py_bool(value: bool) -> &'static str {
+    if value {
+        "True"
+    } else {
+        "False"
+    }
 }
 
 pub fn py_list<'a>(items: impl IntoIterator<Item = &'a str>) -> String {
@@ -33,6 +43,17 @@ fn int(env: &dyn Fn(&str) -> Option<String>, name: &str, default: u64) -> Result
         return Err(format!("{} must be >= 1, got {}", name, value));
     }
     Ok(value as u64)
+}
+
+fn flag(env: &dyn Fn(&str) -> Option<String>, name: &str, default: bool) -> Result<bool, String> {
+    let raw = env(name).unwrap_or_default();
+    let raw = raw.trim();
+    match raw.to_lowercase().as_str() {
+        "" => Ok(default),
+        "true" | "yes" | "on" | "1" => Ok(true),
+        "false" | "no" | "off" | "0" => Ok(false),
+        _ => Err(format!("{} must be true or false, got '{}'", name, raw)),
+    }
 }
 
 pub fn load_config(env: &dyn Fn(&str) -> Option<String>) -> Result<Config, String> {
@@ -100,6 +121,13 @@ pub fn load_config(env: &dyn Fn(&str) -> Option<String>) -> Result<Config, Strin
         on_polls: int(env, "ON_DEBOUNCE_POLLS", 1)? as u32,
         off_polls: int(env, "OFF_DEBOUNCE_POLLS", 4)? as u32,
         watchdog_seconds,
+        game_dnd: flag(env, "GAME_DND", true)?,
+        game_ignore: env("GAME_IGNORE")
+            .unwrap_or_default()
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect(),
     })
 }
 
@@ -132,6 +160,28 @@ mod tests {
         assert_eq!(c.on_polls, 1);
         assert_eq!(c.off_polls, 4);
         assert_eq!(c.watchdog_seconds, 120);
+        assert!(c.game_dnd);
+        assert!(c.game_ignore.is_empty());
+    }
+
+    #[test]
+    fn game_dnd_takes_true_or_false() {
+        for value in ["false", "False", "NO", "off", "0"] {
+            assert!(!load(&[("GAME_DND", value)]).unwrap().game_dnd, "{}", value);
+        }
+        for value in ["true", "True", "yes", "on", "1", "  "] {
+            assert!(load(&[("GAME_DND", value)]).unwrap().game_dnd, "{}", value);
+        }
+        assert_eq!(
+            load(&[("GAME_DND", " maybe ")]).unwrap_err(),
+            "GAME_DND must be true or false, got 'maybe'"
+        );
+    }
+
+    #[test]
+    fn game_ignore_is_a_lowercase_list() {
+        let c = load(&[("GAME_IGNORE", "Wallpaper Engine, ,Steam ")]).unwrap();
+        assert_eq!(c.game_ignore, vec!["wallpaper engine".to_string(), "steam".to_string()]);
     }
 
     #[test]

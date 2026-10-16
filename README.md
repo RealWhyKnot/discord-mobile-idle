@@ -9,6 +9,12 @@ entirely while you've set yourself invisible or offline, on any device. Pick a v
 and it picks up where it left off. If you set yourself idle, it won't switch you back to online when
 you put the phone down.
 
+While a game is running it sets you to Do Not Disturb, and puts back the status you had when the
+game closes. Anything Discord detects as a game counts, even with your activity hidden. Music players
+show up as Listening, so they don't. With your phone and a game both going, you stay on Do Not
+Disturb until the game closes, then go idle. If you were already on Do Not Disturb or idle when the
+game started, it leaves that alone.
+
 Its own login is flagged as AFK. Discord holds back phone notifications while any login looks
 active, and this one never does.
 
@@ -62,7 +68,8 @@ overwriting each other's status changes.
 
 `docker stop` restores your status before the container exits, the same as Quit does in the tray
 app, and so does Ctrl+C when you run it directly. `docker kill` skips it and leaves you on idle
-until the next start, which finishes the restore if it can read the same state folder.
+(or Do Not Disturb, mid-game) until the next start, which finishes the restore if it can read the
+same state folder.
 
 The image is a single static Rust binary on busybox, about 10 MB on disk. It uses about 7 MB of
 memory once logged in. To run it without Docker, build it with `cargo build --release`
@@ -80,14 +87,16 @@ The container reads these from the environment. The Windows app reads the same n
 | `POLL_SECONDS` | `10` | Fallback seconds between checks. Session events from the gateway wake a check sooner. |
 | `RESTORE_STATUS` | `online` | Fallback when there's no saved status. `online` or `dnd`. |
 | `MANAGED_STATUSES` | `online` | Which statuses may be taken over. `online` and `dnd` only. |
-| `ON_DEBOUNCE_POLLS` | `1` | Settled polls before reacting to the phone appearing. At `1` it reacts within about a second of the phone connecting. |
-| `OFF_DEBOUNCE_POLLS` | `4` | Settled polls before reacting to it going away. |
+| `ON_DEBOUNCE_POLLS` | `1` | Settled polls before reacting to the phone appearing or a game starting. At `1` it reacts within about a second. |
+| `OFF_DEBOUNCE_POLLS` | `4` | Settled polls before reacting to either one going away. |
 | `WATCHDOG_SECONDS` | `120` | Give up on a poll loop that stops ticking. The container exits and restarts, the tray app reconnects. |
+| `GAME_DND` | `true` | Set Do Not Disturb while a game is running. `true` or `false`. |
+| `GAME_IGNORE` | empty | Comma-separated names that shouldn't count as games, for apps Discord mistakes for one. Use the name from the `playing` line in the log. Case doesn't matter. |
 | `CHECK_FOR_UPDATES` | `true` | Windows only. Whether it looks for new releases on its own. |
 | `UPDATE_CHANNEL` | `release` | Windows only. `release` or `beta`. |
 | `SKIPPED_TAG` | empty | Windows only. A release tag to stop offering. |
 | `READY_FILE` | `/tmp/ready` | Written once after login. Useful as a healthcheck. |
-| `STATE_DIR` | system temp folder | Where it keeps an interrupted idle and its recent restarts. Mount a volume here to keep both when the container is replaced. |
+| `STATE_DIR` | system temp folder | Where it keeps an interrupted idle or Do Not Disturb, and its recent restarts. Mount a volume here to keep both when the container is replaced. |
 
 ## Debugging
 

@@ -27,7 +27,7 @@ use super::service::{OnState, Service};
 use super::store::{self, APP};
 use super::update::{self, Updater, VERSION};
 use super::wide;
-use crate::config::{load_config, py_list, Config};
+use crate::config::{load_config, py_bool, py_list, Config};
 use crate::{error, info};
 
 const START_DELAY: u64 = 30;
@@ -748,11 +748,13 @@ pub fn main() -> i32 {
         }
     };
     info!(
-        "starting {} poll={}s managed={} restore={}",
+        "starting {} poll={}s managed={} restore={} game_dnd={} game_ignore={}",
         VERSION,
         config.poll_seconds,
         py_list(config.managed.iter().map(String::as_str)),
-        config.restore
+        config.restore,
+        py_bool(config.game_dnd),
+        py_list(config.game_ignore.iter().map(String::as_str))
     );
     run(config)
 }

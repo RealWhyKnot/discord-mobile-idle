@@ -544,6 +544,10 @@ impl runner::Client for DiscordClient {
         self.link.borrow().state.own_status()
     }
 
+    fn games(&self) -> Vec<String> {
+        self.link.borrow().state.games()
+    }
+
     async fn check_token(&self) -> Result<(), Error> {
         self.http.check_token().await
     }

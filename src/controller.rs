@@ -31,6 +31,7 @@ pub struct StatusController {
     pub saved: Option<String>,
     pub holding: bool,
     pub grace_until: f64,
+    pub adopt: bool,
 }
 
 impl StatusController {
@@ -45,6 +46,7 @@ impl StatusController {
             saved: None,
             holding: false,
             grace_until: 0.0,
+            adopt: true,
         }
     }
 
@@ -69,14 +71,11 @@ impl StatusController {
     }
 
     fn take(&mut self, current: &str) -> Option<String> {
-        if current != self.idle_status && !self.managed.contains(current) {
+        let adopting = current == self.idle_status;
+        if (adopting && !self.adopt) || (!adopting && !self.managed.contains(current)) {
             return None;
         }
-        self.saved = if current == self.idle_status {
-            None
-        } else {
-            Some(current.to_string())
-        };
+        self.saved = if adopting { None } else { Some(current.to_string()) };
         self.holding = true;
         self.grace_until = (self.clock)() + self.grace_seconds;
         Some(self.idle_status.to_string())
@@ -283,6 +282,16 @@ pub(crate) mod tests {
         assert!(c.holding);
         assert_eq!(c.saved, None);
         assert_eq!(c.evaluate(false, IDLE), s(ONLINE));
+    }
+
+    #[test]
+    fn without_adopt_an_existing_hold_status_is_left_alone() {
+        let mut c = plain();
+        c.adopt = false;
+        assert_eq!(c.evaluate(true, IDLE), None);
+        assert!(!c.holding);
+        assert_eq!(c.evaluate(false, IDLE), None);
+        assert_eq!(c.evaluate(true, ONLINE), s(IDLE));
     }
 
     #[test]

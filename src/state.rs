@@ -7,6 +7,7 @@ use crate::runner::UNKNOWN;
 use crate::warning;
 
 pub const ALL: &str = "all";
+pub const PLAYING: u64 = 0;
 
 #[derive(Deserialize, Default)]
 pub struct ClientInfo {
@@ -24,6 +25,8 @@ pub struct SessionPayload {
     pub active: bool,
     #[serde(default)]
     pub activities: Vec<Value>,
+    #[serde(default)]
+    pub hidden_activities: Vec<Value>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -33,6 +36,17 @@ pub struct Session {
     pub status: String,
     pub active: bool,
     pub activities: Vec<Value>,
+    pub hidden_activities: Vec<Value>,
+}
+
+fn game_name(activity: &Value) -> Option<&str> {
+    if activity.get("type").and_then(Value::as_u64) != Some(PLAYING) {
+        return None;
+    }
+    activity
+        .get("name")
+        .and_then(Value::as_str)
+        .filter(|name| !name.is_empty())
 }
 
 impl Session {
@@ -43,15 +57,27 @@ impl Session {
             status: p.status.clone(),
             active: p.active,
             activities: p.activities.clone(),
+            hidden_activities: p.hidden_activities.clone(),
         }
     }
 
     fn update(&mut self, p: &SessionPayload) -> bool {
-        let changed = self.status != p.status || self.active != p.active || self.activities != p.activities;
+        let changed = self.status != p.status
+            || self.active != p.active
+            || self.activities != p.activities
+            || self.hidden_activities != p.hidden_activities;
         self.status = p.status.clone();
         self.active = p.active;
         self.activities = p.activities.clone();
+        self.hidden_activities = p.hidden_activities.clone();
         changed
+    }
+
+    fn games(&self) -> impl Iterator<Item = &str> {
+        self.activities
+            .iter()
+            .chain(&self.hidden_activities)
+            .filter_map(game_name)
     }
 }
 
@@ -183,6 +209,19 @@ impl State {
             .count()
     }
 
+    pub fn games(&self) -> Vec<String> {
+        let ours = self.session_id.as_deref();
+        let mut names: Vec<String> = Vec::new();
+        for session in self.sessions.iter().filter(|s| Some(s.session_id.as_str()) != ours) {
+            for name in session.games() {
+                if !names.iter().any(|n| n == name) {
+                    names.push(name.to_string());
+                }
+            }
+        }
+        names
+    }
+
     pub fn client_status(&self) -> String {
         if let Some(ours) = self.current_session() {
             return ours.status.clone();
@@ -268,12 +307,18 @@ impl State {
                 } else {
                     s.client.clone()
                 };
-                format!(
+                let mut line = format!(
                     "session {} status={} active={}",
                     label,
                     s.status,
                     if s.active { "True" } else { "False" }
-                )
+                );
+                let games: Vec<&str> = s.games().collect();
+                if !games.is_empty() {
+                    line.push_str(" playing=");
+                    line.push_str(&games.join(", "));
+                }
+                line
             })
             .collect()
     }
@@ -313,6 +358,7 @@ mod tests {
             status: status.into(),
             active: false,
             activities: vec![],
+            hidden_activities: vec![],
         }
     }
 
@@ -482,6 +528,81 @@ mod tests {
         assert_eq!(parsed[0].client_info.client, "mobile");
         assert!(parsed[0].active);
         assert_eq!(parsed[0].activities.len(), 1);
+    }
+
+    fn with(mut session: SessionPayload, shown: Vec<Value>, hidden: Vec<Value>) -> SessionPayload {
+        session.activities = shown;
+        session.hidden_activities = hidden;
+        session
+    }
+
+    #[test]
+    fn games_are_playing_activities_from_every_other_session() {
+        let game = |name: &str| serde_json::json!({"type": 0, "name": name, "application_id": "1"});
+        let music = serde_json::json!({"type": 2, "name": "YouTube Music", "application_id": "1533867163079671849"});
+        let custom = serde_json::json!({"type": 4, "name": "Custom Status", "state": "busy"});
+        let state = ready(vec![
+            with(
+                p("all", "unknown", "online"),
+                vec![game("PowerWash Simulator"), music.clone()],
+                vec![],
+            ),
+            with(p("me", "web", "online"), vec![game("ours"), custom.clone()], vec![]),
+            with(
+                p("desk", "desktop", "online"),
+                vec![
+                    music,
+                    custom,
+                    game("PowerWash Simulator"),
+                    serde_json::json!({"type": 0, "name": ""}),
+                ],
+                vec![game("VRChat")],
+            ),
+        ]);
+        assert_eq!(state.games(), vec!["PowerWash Simulator", "VRChat"]);
+    }
+
+    #[test]
+    fn listening_alone_is_not_a_game() {
+        let music = serde_json::json!({"type": 2, "name": "YouTube Music"});
+        let state = ready(vec![with(p("desk", "desktop", "online"), vec![music], vec![])]);
+        assert!(state.games().is_empty());
+    }
+
+    #[test]
+    fn a_game_starting_or_hiding_counts_as_a_change() {
+        let game = serde_json::json!({"type": 0, "name": "VRChat"});
+        let mut state = ready(vec![p("me", "web", "online"), p("desk", "desktop", "online")]);
+        let shown = with(p("desk", "desktop", "online"), vec![game.clone()], vec![]);
+        assert!(state.sessions_replace(&[p("me", "web", "online"), shown], false));
+        assert_eq!(state.games(), vec!["VRChat"]);
+        let hidden = with(p("desk", "desktop", "online"), vec![], vec![game]);
+        assert!(state.sessions_replace(&[p("me", "web", "online"), hidden], false));
+        assert_eq!(state.games(), vec!["VRChat"]);
+        assert!(state.sessions_replace(&[p("me", "web", "online"), p("desk", "desktop", "online")], false));
+        assert!(state.games().is_empty());
+    }
+
+    #[test]
+    fn hidden_activities_parse_from_gateway_json() {
+        let json = r#"[{"session_id":"abc","client_info":{"client":"desktop","os":"windows","version":0},
+            "status":"online","activities":[],"active":true,
+            "hidden_activities":[{"type":0,"name":"VRChat","application_id":"438122941302046720",
+            "timestamps":{"start":1760000000000},"created_at":1760000000000,"id":"spotify:1"}]}]"#;
+        let parsed: Vec<SessionPayload> = serde_json::from_str(json).unwrap();
+        let mut state = ready(vec![p("me", "web", "online")]);
+        state.sessions_replace(&parsed, false);
+        assert_eq!(state.games(), vec!["VRChat"]);
+    }
+
+    #[test]
+    fn describe_names_the_games_a_session_is_playing() {
+        let game = serde_json::json!({"type": 0, "name": "PowerWash Simulator"});
+        let state = ready(vec![with(p("desk", "desktop", "dnd"), vec![], vec![game])]);
+        assert_eq!(
+            state.describe_sessions()[0],
+            "session desktop status=dnd active=False playing=PowerWash Simulator"
+        );
     }
 
     #[test]

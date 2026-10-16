@@ -4,7 +4,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tokio::sync::mpsc::unbounded_channel;
 
-use idlebot::config::{load_config, py_list};
+use idlebot::config::{load_config, py_bool, py_list};
 use idlebot::controller::{monotonic, Debouncer, StatusController};
 use idlebot::discord::{self, DiscordClient, Gateway, GatewaySession, Http};
 use idlebot::persist::{start_delay, HoldMarker, StartLog};
@@ -49,14 +49,6 @@ fn parse_args() -> Result<Args, i32> {
 
 fn env_path(name: &str, default: PathBuf) -> PathBuf {
     std::env::var_os(name).map(PathBuf::from).unwrap_or(default)
-}
-
-fn py_bool(value: bool) -> &'static str {
-    if value {
-        "True"
-    } else {
-        "False"
-    }
 }
 
 #[cfg(unix)]
@@ -126,6 +118,9 @@ fn run() -> i32 {
     );
     let stats_link = link.clone();
     runner.stats = Some(Box::new(move || stats_link.borrow().state.ignored_summary(8)));
+    runner.games = config.game_dnd;
+    runner.game_ignore = config.game_ignore.clone();
+    runner.game_marker = Some(HoldMarker::new(state_dir.join("idlebot-game")));
     let mut session = GatewaySession {
         gateway: Some(Gateway::new(http, link.clone(), notes_tx, commands_rx)),
         commands: commands_tx,
@@ -146,11 +141,13 @@ fn run() -> i32 {
     starts.save(&recent);
 
     info!(
-        "starting observe={} poll={}s managed={} restore={}",
+        "starting observe={} poll={}s managed={} restore={} game_dnd={} game_ignore={}",
         py_bool(args.observe),
         config.poll_seconds,
         py_list(config.managed.iter().map(String::as_str)),
-        config.restore
+        config.restore,
+        py_bool(config.game_dnd),
+        py_list(config.game_ignore.iter().map(String::as_str))
     );
 
     let runtime = match tokio::runtime::Builder::new_current_thread().enable_all().build() {

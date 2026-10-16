@@ -266,9 +266,13 @@ impl Supervisor {
         );
         let stats_link = link.clone();
         runner.stats = Some(Box::new(move || stats_link.borrow().state.ignored_summary(8)));
+        runner.games = config.game_dnd;
+        runner.game_ignore = config.game_ignore.clone();
+        runner.game_marker = Some(HoldMarker::new(store::path_for("game-hold")));
         let on_state = self.on_state.clone();
         runner.on_change = Some(Box::new(move |change| match change {
             Change::Wrote(status) if status == IDLE => on_state("holding", "idle while your phone is awake"),
+            Change::Playing => on_state("holding", "do not disturb while you play"),
             Change::Wrote(status) | Change::Shown(status) => on_state("active", &format!("back to {}", status)),
             Change::Hidden { by_choice: true } => on_state("active", "leaving your status alone"),
             Change::Hidden { by_choice: false } => on_state("active", "offline while nothing else is connected"),
