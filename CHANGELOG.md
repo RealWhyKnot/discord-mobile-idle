@@ -11,6 +11,7 @@ starting at 0.
 ### Added
 - Run the container on a static Rust build that idles at about 7 MB (2026.10.13.0-3DA4) (7fc6dbb)
 - Rebuild the Windows tray app in Rust, cutting the exe from 26 MB to 7 MB (2026.10.14.0-7FC6) (9fc5218)
+- Set Do Not Disturb while a game is running (2026.10.15.0-9FC5) (608a82a)
 
 ### Changed
 - Build the Discord client in one place for both entry points (2026.10.8.0-7ABB) (bfd9efc)
